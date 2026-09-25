@@ -2,17 +2,17 @@
 
 **Purpose of this file:** everything locked during planning, consolidated into one build-ready brief. This file lives at the repo root as `CLAUDE.md`, so Claude Code loads it automatically at the start of every session in this repo — no need to re-paste it. Where this brief says "locked," treat it as non-negotiable — those are explicit decisions the team already made, not defaults to reconsider mid-build.
 
-**Full detail behind this brief lives in `/docs`:** `PRD.md` (personas, user stories, success metrics), `TRD.md` (full non-functional requirements), `APP_FLOW.md` (step-by-step per persona), `UI_UX_DESIGN.md`, `BACKEND_SCHEMA_AUTH.md`, `IMPLEMENTATION_PLAN.md`, `DEMO_SCRIPT.md`. This brief is the condensed, always-loaded version — read the relevant doc in `/docs` if something here is ambiguous or you need the fuller reasoning behind a rule.
+**Full detail behind this brief lives in `/docs`:** `PRD.md` (personas, user stories, success metrics), `TRD.md` (full non-functional requirements), `APP_FLOW.md` (step-by-step per persona), `UI_UX_DESIGN.md`, `BACKEND_SCHEMA_AUTH.md`, `IMPLEMENTATION_PLAN.md`, `DEMO_SCRIPT.md`, `CASH_TRACKING_UPDATE.md` (cash dual-confirmation design — read this before touching anything cash-related). This brief is the condensed, always-loaded version — read the relevant doc in `/docs` if something here is ambiguous or you need the fuller reasoning behind a rule.
 
 ## 0. What this is
 
-**What we're building:** a transparent, point-of-sale value-split payment app. A tourist pays once via M-Pesa; the payment automatically splits between the woman/PWD producer who made the value and the driver who referred the sale — and separately compensates the producer for photo consent. Every shilling collected is either the maker's or the driver's — **there is no platform fee, ever.**
+**What we're building:** a transparent, point-of-sale value-split payment app. A tourist pays once via M-Pesa or cash; the payment automatically splits between the woman/PWD producer who made the value and the driver who referred the sale — and separately compensates the producer for photo consent. Every shilling collected is either the maker's or the driver's — **there is no platform fee, ever.**
 
 **Who it's for:** four users, in order of who touches it most: the tourist (no account, pays once), the producer/maker (a woman or PWD artisan/cook/performer, wants a guaranteed transparent share with no dependency on a driver handing over cash), the driver/guide (wants a disclosed, guaranteed referral fee instead of pressuring a sale), and the coordinator (onboards people, watches the ledger, resolves disputes).
 
 **Visual style we're aiming for:** minimal, fintech-restrained — quiet confidence, not startup energy. Two accent colors with single jobs (green for confirmed/success, ochre for the one "Pay" button, terracotta for errors only), one type family for words (Inter) and one for numbers (IBM Plex Mono, tabular), one 8px radius everywhere, one 8px spacing grid. No gradients, no stock tourist photography, no icon without a text label, nothing that reads as generated-in-five-minutes. Full spec in section 7 and the published Design Reference artifact.
 
-**The core it needs to prove, end to end, by the demo:** a real tourist payment splits automatically and correctly between maker and driver (with photo consent as its own component), the ledger updates live, and at least one withdrawal actually pays out — on real (sandbox) Daraja, not mocked.
+**The core it needs to prove, end to end, by the demo:** a real tourist payment splits automatically and correctly between maker and driver (with photo consent as its own component), the ledger updates live, and at least one withdrawal actually pays out — on real (sandbox) Daraja, not mocked. Cash payments prove the same split via dual confirmation instead of Daraja (see section 4 rule 12).
 
 This is an MVP for the Future Leaders Challenge Eastern Africa, built for a live demo, not a production system yet.
 
@@ -23,7 +23,7 @@ You are the engineer implementing this MVP. Treat section 4 (business rules) and
 - **Don't invent scope.** If it's listed under section 10 ("explicitly not building yet"), don't build it, even as a stub that half-works — a half-built platform-fee field is worse than no field.
 - **Don't restyle.** Use the exact tokens in section 7. If a screen needs something the tokens don't cover, ask, don't improvise a new color or a second radius.
 - **Don't skip the build stages below out of order** (same discipline the planning phase used) — each stage should be working and committed before the next one starts, so a demo is always possible from wherever the build currently stands, not just at the very end.
-- **Prefer boring and correct over clever.** This is a payments ledger for real people's earnings — the append-only ledger, the idempotency keys, and the full-balance-only withdrawal rule all exist specifically to remove entire classes of bugs; don't "simplify" them back in.
+- **Prefer boring and correct over clever.** This is a payments ledger for real people's earnings — the append-only ledger, the idempotency keys, and the full-balance-only withdrawal rule all exist specifically to remove entire classes of bugs; don't "simplify" them back in. The cash dual-confirmation flow (section 4 rule 12) exists for the same reason — don't collapse it back into a single self-reported log.
 - **Ask before touching anything in section 4, 5, or 6** — those are the parts a judge's Q&A will actually probe.
 
 ## 1. Stack (reused from a prior project, "Operix" — proven, not novel)
@@ -31,7 +31,7 @@ You are the engineer implementing this MVP. Treat section 4 (business rules) and
 - **Backend:** FastAPI + async SQLAlchemy + asyncpg, deployed on Render as a Web Service.
 - **Frontend:** React + Vite + Tailwind, `HashRouter` (not `_redirects` — Render SPA routing gotcha), deployed on Render as a second Web Service (or static site if the frontend ends up fully static — backend decides that, not assumed here).
 - **Database / Auth / Storage / Realtime:** Supabase (already provisioned — project exists, credentials saved outside chat, to be set as Render env vars once the two Render services are created in this phase).
-- **Payments:** Safaricom Daraja — STK Push (collection) + B2C (payout). Sandbox already set up (consumer key/secret obtained, STK Push + B2C sandbox endpoints confirmed, placeholder callback URL registered — swap for ngrok during local dev, then the real Render URL at deploy).
+- **Payments:** Safaricom Daraja — STK Push (collection) + B2C (payout) for M-Pesa; cash uses the in-app dual-confirmation flow instead (section 4 rule 12, `CASH_TRACKING_UPDATE.md`). Sandbox already set up (consumer key/secret obtained, STK Push + B2C sandbox endpoints confirmed, placeholder callback URL registered — swap for ngrok during local dev, then the real Render URL at deploy).
 - **Batch job:** in-process APScheduler for the daily 18:00 EAT payout sweep (Render free tier has no native cron).
 
 ## 2. Known deployment gotchas — apply from day one, don't rediscover these under deadline pressure
@@ -71,9 +71,11 @@ created_at    timestamptz not null default now()
 -- transactions
 -- Product and photo consent are two independent, separately-priced components.
 -- A transaction charges whichever component(s) are active for that visit — never a merged bundle.
+-- payment_method + the cash_* statuses below implement the dual-confirmation cash flow (section 4 rule 12).
 id                    uuid primary key default gen_random_uuid(),
 producer_id           uuid references producers(id),
-driver_id             uuid references drivers(id),   -- nullable: no driver on a photo-only visit with no referral
+driver_id             uuid references drivers(id),   -- nullable: no driver on a photo-only visit or a walk-up (Case B) cash sale with no referral
+payment_method        text not null default 'mpesa' check (payment_method in ('mpesa','cash')),
 product_enabled       boolean not null default false,
 product_amount        numeric,              -- null unless product_enabled
 product_maker_amount  numeric,              -- null unless product_enabled
@@ -83,12 +85,18 @@ photo_amount          numeric,              -- null unless photo_enabled; paid 1
 total_amount          numeric not null check (total_amount > 0),
 maker_amount          numeric not null,     -- product_maker_amount + photo_amount
 driver_amount         numeric not null default 0,  -- product_driver_amount only
-stk_receipt           text unique,
-status                text not null check (status in ('initiated','confirmed','failed','disputed')),
+stk_receipt           text unique,          -- mpesa only, null for cash
+status                text not null check (status in ('initiated','confirmed','failed','disputed','cash_unconfirmed','cash_confirmed','cash_expired')),
+driver_confirmed_at   timestamptz,          -- cash Case A (driver_id set): driver's confirm tap
+maker_confirmed_at    timestamptz,          -- cash Case A and Case B: maker's confirm tap
+tourist_confirmed_at  timestamptz,          -- cash Case B (no driver_id): tourist's confirm tap
+confirmation_deadline timestamptz,          -- cash only: created_at + CASH_CONFIRM_WINDOW_MINUTES (default 10)
 created_at            timestamptz not null default now(),
 constraint transactions_at_least_one_component check (product_enabled or photo_enabled)
 
 -- wallet_ledger_entries   (append-only — balances are computed, never stored directly)
+-- Written identically for mpesa and cash transactions, once each has reached its own
+-- "money has actually moved" point: the STK callback for mpesa, cash_confirmed for cash.
 id              uuid primary key default gen_random_uuid(),
 recipient_type  text not null check (recipient_type in ('maker','driver')),
 recipient_id    uuid not null,
@@ -109,7 +117,10 @@ status            text not null check (status in ('requested','processing','paid
 requested_at      timestamptz not null default now(),
 resolved_at       timestamptz
 
--- sync_queue_items   (offline cash transactions — evidence only, never enters payout pipeline)
+-- sync_queue_items   (true offline/no-connectivity capture — a still-unbuilt future concern,
+-- distinct from cash-payment tracking, which now lives directly in `transactions` above via
+-- payment_method + the cash_* statuses. Do not repurpose this table for cash — it's for the
+-- separate case of no network at all, e.g. a fully offline PWA sync queue, if that gets built.)
 id                uuid primary key default gen_random_uuid(),
 payload           jsonb not null,
 idempotency_key   uuid unique not null,
@@ -131,17 +142,23 @@ Storage: one Supabase Storage bucket, `qr-codes` — public read, coordinator-on
 9. **Withdrawals are always full-balance, never partial.** Threshold KES 500.
 10. **Daily batch sweep at 18:00 EAT** auto-withdraws anyone ≥ KES 500 who hasn't already withdrawn that day.
 11. **Payout failure:** funds return to `available`, one automatic retry, then requires manual coordinator retry.
-12. **Offline/cash:** recorded as `recorded_offline` for evidence only — never enters the withdrawal pipeline.
+12. **Cash is a first-class second payment method, tracked via dual confirmation — not an offline afterthought and not evidence-only.** Split into two enforcement cases by whether a driver is attached, because the enforcement mechanism differs:
+    - **Case A — referred cash sale** (`driver_id` set): requires BOTH `driver_confirmed_at` and `maker_confirmed_at` to be set before the transaction moves from `cash_unconfirmed` to `cash_confirmed`.
+    - **Case B — walk-up cash sale** (no `driver_id`): requires BOTH `tourist_confirmed_at` and `maker_confirmed_at`.
+    - A `cash_unconfirmed` transaction still unconfirmed past `confirmation_deadline` (default 10 min, `CASH_CONFIRM_WINDOW_MINUTES`) flips to `cash_expired` — kept visible in the ledger and reconciliation view, never deleted, never silently retried.
+    - **Only `cash_confirmed` transactions write `wallet_ledger_entries` and enter the withdrawal pipeline.** A `cash_expired` transaction never does.
+    - Full design rationale: `CASH_TRACKING_UPDATE.md`. Do not simplify this back to a single self-reported "log cash sale" form — that was an earlier, explicitly rejected design.
 13. **Disputes:** a coordinator can freeze a transaction's ledger entries (`frozen` status), excluded from any withdrawal/batch calculation until resolved.
 14. **No partial withdrawals, no automatic dispute resolution, no public self-registration, no multi-currency/KYC/tax handling** — all explicitly out of scope.
 15. **Dynamic GPS/volume-scored referee commissions** — explicitly parked as a Phase 3+ pitch narrative, not built now. Use the fixed per-producer split only.
+16. **Only `cash_confirmed` referred transactions count toward a driver's clean-referral streak** for any future commission-rate review — a `cash_expired` referral does not count. This is what gives the driver a reason to chase confirmation rather than let it lapse.
 
 ## 5. Auth model
 
 Four roles, no public self-registration:
 
-- **Tourist** — no account. The public pay-initiate endpoint is the only surface, rate-limited per phone number.
-- **Producer / Driver** — coordinator-onboarded via Supabase Auth's admin API, phone number as identifier + a 4-digit PIN issued in person. Logs in with phone + PIN.
+- **Tourist** — no account. The public pay-initiate endpoint is the only surface, rate-limited per phone number. Cash Case B confirmation (rule 12) also needs no login — use a short-lived signed token tied to the transaction id, delivered via whatever already shows the tourist the price-transparency card (an in-page "I paid" button if she's still on the payment screen, or an SMS link if not). Do not require Supabase Auth for this — it would contradict "no account for tourists."
+- **Producer / Driver** — coordinator-onboarded via Supabase Auth's admin API, phone number as identifier + a 4-digit PIN issued in person. Logs in with phone + PIN. Cash-confirmation taps (rule 12, Case A/B for maker; Case A for driver) happen from their authenticated dashboard session.
 - **Coordinator/Admin** — same Supabase Auth mechanism, account carries an `is_admin` claim.
 
 Enforced twice: Supabase Row Level Security at the data layer, FastAPI endpoint checks at the API layer. Only FastAPI's service-role key (called **Secret key** under Supabase's current naming) writes to money-affecting tables — never exposed to the frontend, which uses the Publishable key instead.
@@ -150,18 +167,19 @@ RLS permission matrix:
 
 | Role | producers/drivers | transactions | wallet_ledger_entries | withdrawal_requests | admin actions |
 |---|---|---|---|---|---|
-| Tourist | — | create (via pay endpoint only) | — | — | — |
-| Producer/Driver | read own | read own | read own | create/read own | — |
+| Tourist | — | create (via pay endpoint only) + confirm own cash txn (token-scoped) | — | — | — |
+| Producer/Driver | read own | read own + confirm own cash txn | read own | create/read own | — |
 | Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration |
 
 ## 6. Money-movement sequence
 
-1. `POST /transactions/initiate` — STK Push fires.
-2. `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` ledger entries for the maker (product_maker_amount + photo_amount, whichever enabled) and, only if `product_enabled`, for the driver.
+1. `POST /transactions/initiate` — for `payment_method: mpesa`, STK Push fires. For `payment_method: cash`, no Daraja call — the transaction is created directly in `cash_unconfirmed` status with `confirmation_deadline` set (`created_at + CASH_CONFIRM_WINDOW_MINUTES`).
+2. **M-Pesa path:** `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` ledger entries for the maker (product_maker_amount + photo_amount, whichever enabled) and, only if `product_enabled`, for the driver.
+2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` — called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B). Sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed` and the same `pending` ledger entries are written as in step 2 — from here, cash-derived entries flow through steps 3–6 identically to M-Pesa ones. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and no ledger entries are ever written for that transaction.
 3. Balance becomes `available` once cleared for payout eligibility.
 4. `POST /withdrawals/request` (on-demand, full balance, ≥ KES 500) or the 18:00 EAT batch sweep triggers Daraja B2C, with a generated idempotency key.
 5. `POST /daraja/b2c-callback` — marks the ledger entry `paid`, or on failure returns funds to `available` (one automatic retry, then manual coordinator retry).
-6. `GET /admin/reconciliation` — Till collected vs. disbursed vs. pending, should always sum correctly.
+6. `GET /admin/reconciliation` — Till collected vs. disbursed vs. pending, should always sum correctly, including confirmed-cash entries.
 
 ## 7. Frontend — design tokens and screens
 
@@ -173,7 +191,7 @@ Full interactive reference: the published Design Reference artifact (color/type/
 --sawa-radius: 8px; --sawa-space: 8px;
 ```
 
-Inter (UI/words) + IBM Plex Mono (numbers only, tabular-nums). Mobile-first, 420px max-width card-centered, except the coordinator reconciliation view (full width past 768px, plain table, never a chart) and the public homepage (full width, its own layout — see 7.1). Three status states only: pending / confirmed / failed. No gradients, no stock photography (the homepage's one exception is scoped separately in 7.1), no icon without a text label. Screens: **public homepage** (7.1), price-transparency card (two component cards, not merged), payment entry, confirmation, shared producer/driver/coordinator login, producer/driver dashboard, coordinator registration (with the charges-for toggle), coordinator reconciliation, dispute-flag action (modal off a table row, not its own screen).
+Inter (UI/words) + IBM Plex Mono (numbers only, tabular-nums). Mobile-first, 420px max-width card-centered, except the coordinator reconciliation view (full width past 768px, plain table, never a chart) and the public homepage (full width, its own layout — see 7.1). Status states: pending / confirmed / failed for M-Pesa, plus `cash_unconfirmed` / `cash_confirmed` / `cash_expired` for cash — render the cash states visibly distinct from the M-Pesa three (an unconfirmed cash sale is "still resolving," not "flagged as wrong," so it should not look like a disputed transaction). No gradients, no stock photography (the homepage's one exception is scoped separately in 7.1), no icon without a text label. Screens: **public homepage** (7.1), price-transparency card (two component cards, not merged), payment entry (M-Pesa "Pay [amount]" button plus a "Cash" option that creates the transaction directly and moves to a waiting-for-confirmation state), confirmation (for cash, shows the honest `cash_unconfirmed`/`cash_confirmed` state rather than a premature checkmark, and is where a Case B tourist taps her own confirm), shared producer/driver/coordinator login, producer/driver dashboard (recent-transactions list needs the cash states as a visibly distinct status, plus an inline "Confirm" action on any row awaiting this user's own confirmation), coordinator registration (with the charges-for toggle), coordinator reconciliation (status column includes all three cash states as distinct, visible entries — expired-unconfirmed cash rows are what a coordinator should notice first), dispute-flag action (modal off a table row, not its own screen).
 
 ## 7.1 Public homepage — content, layout, and photography rule
 
@@ -190,7 +208,7 @@ A ninth screen, added late in planning: a public marketing homepage (`/` on the 
 
 1. **Hero.** Headline (from the PRD's one-line summary — "A transparent, point-of-sale value-split app that routes tourist payments directly to the women and PWD producers and drivers who created the value") + a short subhead. Visual: the price-transparency card component itself, rendered live (not a screenshot) as the hero graphic — no photo here, this is the "no photography needed, the product is the visual" moment. Two CTAs: primary "See it work" (scrolls to or links the live demo/reconciliation view), secondary "Read the rulebook" (links out, e.g. to the published Rulebook reference).
 2. **The problem.** The boma stat as a large mono numeral callout — "KSh 300 of every $20 paid at the gate" — with a short paragraph underneath. Text and numerals only, no photo, no chart (this system doesn't use charts to dramatize a number — the number itself, set huge in Plex Mono, is the visual).
-3. **The solution.** Three-step diagram — disclosed price → automatic split → paid instantly — using simple line icons (never emoji) each paired with a text label, consistent with the "icon never alone" rule.
+3. **The solution.** Three-step diagram — disclosed price → automatic split (M-Pesa or cash) → paid instantly — using simple line icons (never emoji) each paired with a text label, consistent with the "icon never alone" rule.
 4. **Who it's for.** The one licensed photo lives here, as a duotoned background behind or beside four short persona blurbs (tourist, producer, driver, coordinator — same four from the PRD's personas table).
 5. **Roadmap.** A plain text/timeline strip: Pilot → Local Scale → Multi-Site (from the Implementation Plan's Phase 1–3), no photo, no chart.
 6. **Footer.** Link to the live demo, the GitHub repo, the challenge name, and photo attribution if the license requires it.
@@ -203,24 +221,24 @@ Don't generate the whole app in one pass. Each stage should end in something tha
 1.5. **Public homepage (can happen any time after stage 1 — no backend dependency).** Build the marketing homepage per section 7.1. Good to do early: it's demoable progress with zero backend risk, and it's the page most likely to be open when a judge first looks at your work.
 2. **Database schema.** Turn section 3's SQL into actual Supabase migrations (SQL editor or a migration tool, your choice). Checkpoint: all six tables exist in Supabase with the constraints in place, verified by inserting one test row per table by hand.
 3. **Auth.** Coordinator-created accounts via Supabase Auth's admin API (phone + PIN), login endpoint, RLS policies matching the permission matrix in section 5. Checkpoint: you can log in as a test producer and a test coordinator and get different access.
-4. **Core backend endpoints (no Daraja yet).** `/transactions/initiate` and the ledger-writing logic, using a manually-triggered "fake confirm" instead of a real Daraja callback for now. Checkpoint: a fake transaction correctly writes ledger entries split per section 4's rules (test both product-only and product+photo cases).
+4. **Core backend endpoints (no Daraja yet).** `/transactions/initiate` and the ledger-writing logic, using a manually-triggered "fake confirm" instead of a real Daraja callback for now. Also build the cash dual-confirmation path here (rule 12, `POST /transactions/:id/confirm`) — it shares the same ledger-writing logic once a transaction reaches its confirmed state, so it's a small parallel branch, not a separate subsystem. Checkpoint: a fake M-Pesa transaction and a cash transaction (both Case A and Case B) each correctly write ledger entries split per section 4's rules.
 5. **Daraja integration.** Real STK Push, real callback handling, idempotency check, then B2C payout + its callback. Checkpoint: one real sandbox transaction goes all the way from STK Push to a ledger entry moving from `pending` to `available`.
-6. **Batch sweep.** APScheduler job for the 18:00 EAT sweep, on-demand withdrawal endpoint. Checkpoint: a withdrawal actually triggers B2C and the ledger entry reaches `paid`.
-7. **Frontend screens, wired.** Build against the wireframes/design tokens in section 7, screen by screen, each one talking to the real backend as soon as it exists — price card and payment entry first (they depend on stage 4-5), then confirmation, then producer/driver dashboard, then coordinator login/registration/reconciliation last.
-8. **Reconciliation + disputes.** The coordinator view (collected/disbursed/pending tiles + table) and the dispute-flag action that freezes ledger entries.
+6. **Batch sweep.** APScheduler job for the 18:00 EAT sweep, on-demand withdrawal endpoint. Checkpoint: a withdrawal actually triggers B2C and the ledger entry reaches `paid` — for both an M-Pesa-sourced and a cash-sourced ledger entry.
+7. **Frontend screens, wired.** Build against the wireframes/design tokens in section 7, screen by screen, each one talking to the real backend as soon as it exists — price card and payment entry first (they depend on stage 4-5, including the Cash option), then confirmation, then producer/driver dashboard (with the confirm action), then coordinator login/registration/reconciliation last.
+8. **Reconciliation + disputes.** The coordinator view (collected/disbursed/pending tiles + table, with the three cash states visible) and the dispute-flag action that freezes ledger entries.
 9. **End-to-end rehearsal.** Run the exact sequence in `DEMO_SCRIPT.md` for real, on the actual deployed Render URLs, not localhost — this is also when the backup screen recording gets made (see `DEMO_SCRIPT.md` section 5).
 
 ## 9. Phase 1 scope — definition of done
 
-Per the Implementation Plan: formalize the pilot agreement, co-design/print the price-transparency card, confirm the producer's Till, **build the MVP** (QR generation, Daraja sandbox split logic, transaction log), print the driver's QR, run the pilot 2–3 weeks. Done when: **at least one real, end-to-end transaction — tourist pays, ledger credits, a successful withdrawal — logged and demonstrable**, matching the Demo Script's live-demo beat exactly (STK Push → split lands → ledger updates in real time on the reconciliation view).
+Per the Implementation Plan: formalize the pilot agreement, co-design/print the price-transparency card, confirm the producer's Till, **build the MVP** (QR generation, Daraja sandbox split logic, cash dual-confirmation split logic, transaction log), print the driver's QR, run the pilot 2–3 weeks. Done when: **at least one real, end-to-end transaction — tourist pays, ledger credits, a successful withdrawal — logged and demonstrable**, matching the Demo Script's live-demo beat exactly (STK Push → split lands → ledger updates in real time on the reconciliation view).
 
 ## 10. Explicitly not building yet
 
-Production Daraja B2C approval (parallel-tracked, not a blocker for sandbox demo), dynamic GPS-scored referee commissions, dark mode (tokens exist, implementation deferred), any platform fee/community-fund mechanism, partial withdrawals, automatic dispute resolution, multi-currency/KYC/tax handling, public self-registration.
+Production Daraja B2C approval (parallel-tracked, not a blocker for sandbox demo), dynamic GPS-scored referee commissions, dark mode (tokens exist, implementation deferred), any platform fee/community-fund mechanism, partial withdrawals, automatic dispute resolution, multi-currency/KYC/tax handling, public self-registration, geofencing on cash confirmation (same-site check — a Phase 2 hardening step, not a Phase 1 blocker), true offline/no-connectivity capture (`sync_queue_items` exists in the schema but is unbuilt — not the same thing as cash tracking, see section 3).
 
 ## 11. Environment variables (names only — values come from where you saved them, never from this chat)
 
-Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), `DATABASE_URL` (asyncpg, `ssl=True` not `"require"`), `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_CALLBACK_BASE_URL`.
+Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), `DATABASE_URL` (asyncpg, `ssl=True` not `"require"`), `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_CALLBACK_BASE_URL`, `CASH_CONFIRM_WINDOW_MINUTES` (default 10 — kept as an env var, not a hardcoded constant, since the right window is genuinely unknown until Phase 0/1 field testing).
 Frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
 
 Set these as a Render Environment Group once the two Web Services exist (deferred from Phase G on purpose) — never commit them to the repo.
