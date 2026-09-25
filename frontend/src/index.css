@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+@theme {
+  --color-sawa-bg: #fafaf8;
+  --color-sawa-surface: #ffffff;
+  --color-sawa-text: #1a1a1a;
+  --color-sawa-text-muted: #6b6b63;
+  --color-sawa-border: #e4e2da;
+  --color-sawa-green: #1e5b3a;
+  --color-sawa-terracotta: #8c1d1d;
+  --color-sawa-ochre: #b97a22;
+
+  --radius-sawa: 8px;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+body {
+  background-color: var(--color-sawa-bg);
+  color: var(--color-sawa-text);
+  font-family: var(--font-sans);
+}

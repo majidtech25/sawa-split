@@ -1,0 +1,37 @@
+import PriceTransparencyCard from "../components/PriceTransparencyCard"
+import { DisabledButton, LinkButton } from "../components/Button"
+import { demoTransaction } from "../data/demoTransaction"
+
+export default function Hero() {
+  return (
+    <section className="mx-auto flex max-w-6xl flex-col gap-12 px-6 py-16 md:flex-row md:items-center md:py-24">
+      <div className="flex-1">
+        <h1 className="text-3xl font-semibold leading-tight text-sawa-text md:text-4xl">
+          A transparent, point-of-sale value-split app that routes tourist
+          payments directly to the women and PWD producers and drivers who
+          created the value
+        </h1>
+        <p className="mt-4 max-w-lg text-base text-sawa-text-muted">
+          Every shilling a tourist pays for a craft, meal, or photo goes
+          straight to the maker and the driver who earned it — split
+          automatically, disclosed before you pay. No platform fee, ever.
+        </p>
+        <div className="mt-8 flex flex-wrap gap-4">
+          <DisabledButton>
+            See it work
+            <span className="text-xs">(coming soon)</span>
+          </DisabledButton>
+          <LinkButton
+            href="https://claude.ai/artifact/PWnxWEpT7X36HCYXYCGj1D"
+            external
+          >
+            Read the rulebook
+          </LinkButton>
+        </div>
+      </div>
+      <div className="flex flex-1 justify-center md:justify-end">
+        <PriceTransparencyCard {...demoTransaction} />
+      </div>
+    </section>
+  )
+}
