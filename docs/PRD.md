@@ -45,14 +45,14 @@ Both are one pattern: value tourists already pay for is created by women and PWD
 
 ## 6. Functional requirements (MVP scope)
 
-1. Public payment-initiate flow (no login) — STK Push, rate-limited per phone number.
+1. Public payment-initiate flow (no login) — M-Pesa STK Push or cash, rate-limited per phone number.
 2. Price-transparency card showing each active component (product, photo consent) as its own priced card, never merged — only the components a producer has switched on appear, and each is split independently (product: maker/driver; photo: maker only, no split).
 3. Driver identification via QR scan at point of sale.
 4. Automatic ledger crediting on Daraja payment confirmation (pending balance).
 5. On-demand withdrawal (full balance, ≥ KES 500) and a daily 18:00 EAT batch sweep, both via Daraja B2C.
 6. Producer/Driver login (coordinator-issued phone + PIN) and a dashboard showing balance + transaction history.
 7. Coordinator dashboard: registration, reconciliation view, dispute flagging, manual payout retry.
-8. Offline cash-transaction logging, recorded for evidence only, synced when connectivity returns.
+8. Cash as a first-class second payment method, tracked via dual confirmation rather than a self-reported log: a referred sale needs both driver and maker to confirm, a walk-up sale needs both tourist and maker; an unconfirmed cash sale that misses its confirmation window expires visibly in the ledger rather than entering the payout pipeline.
 
 ## 7. Non-goals (explicitly out of scope for MVP)
 

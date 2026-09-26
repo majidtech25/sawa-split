@@ -6,7 +6,7 @@
 
 ```sql
 -- producers
-id            uuid primary key,
+id            uuid primary key default gen_random_uuid(),
 name          text not null,
 phone         text unique not null,
 till          text not null,
@@ -19,7 +19,7 @@ created_at    timestamptz not null default now(),
 constraint producers_at_least_one_component check (charges_product or charges_photo)
 
 -- drivers
-id            uuid primary key,
+id            uuid primary key default gen_random_uuid(),
 name          text not null,
 phone         text unique not null,
 till          text not null,
@@ -30,9 +30,11 @@ created_at    timestamptz not null default now()
 -- transactions
 -- Product and photo consent are two independent, separately-priced components.
 -- A transaction charges whichever component(s) are active for that visit — never a merged bundle.
-id                    uuid primary key,
+-- payment_method + the cash_* statuses below implement the dual-confirmation cash flow (section 4 rule 12 of CLAUDE.md).
+id                    uuid primary key default gen_random_uuid(),
 producer_id           uuid references producers(id),
-driver_id             uuid references drivers(id),   -- nullable: no driver on a photo-only visit with no referral
+driver_id             uuid references drivers(id),   -- nullable: no driver on a photo-only visit or a walk-up (Case B) cash sale with no referral
+payment_method        text not null default 'mpesa' check (payment_method in ('mpesa','cash')),
 product_enabled       boolean not null default false,
 product_amount        numeric,              -- null unless product_enabled; the component's own total
 product_maker_amount  numeric,              -- null unless product_enabled; maker's split of product_amount
@@ -42,13 +44,19 @@ photo_amount          numeric,              -- null unless photo_enabled; paid 1
 total_amount          numeric not null check (total_amount > 0),  -- product_amount + photo_amount, whichever are enabled
 maker_amount          numeric not null,     -- product_maker_amount + photo_amount
 driver_amount         numeric not null default 0,  -- product_driver_amount only — photo never contributes here
-stk_receipt           text unique,
-status                text not null check (status in ('initiated','confirmed','failed','disputed')),
+stk_receipt           text unique,          -- mpesa only, null for cash
+status                text not null check (status in ('initiated','confirmed','failed','disputed','cash_unconfirmed','cash_confirmed','cash_expired')),
+driver_confirmed_at   timestamptz,          -- cash Case A (driver_id set): driver's confirm tap
+maker_confirmed_at    timestamptz,          -- cash Case A and Case B: maker's confirm tap
+tourist_confirmed_at  timestamptz,          -- cash Case B (no driver_id): tourist's confirm tap
+confirmation_deadline timestamptz,          -- cash only: created_at + CASH_CONFIRM_WINDOW_MINUTES (default 10)
 created_at            timestamptz not null default now(),
 constraint transactions_at_least_one_component check (product_enabled or photo_enabled)
 
 -- wallet_ledger_entries   (append-only — balances are computed, never stored directly)
-id              uuid primary key,
+-- Written identically for mpesa and cash transactions, once each has reached its own
+-- "money has actually moved" point: the STK callback for mpesa, cash_confirmed for cash.
+id              uuid primary key default gen_random_uuid(),
 recipient_type  text not null check (recipient_type in ('maker','driver')),
 recipient_id    uuid not null,
 amount          numeric not null check (amount > 0),
@@ -58,7 +66,7 @@ created_at      timestamptz not null default now()
 -- index: (recipient_type, recipient_id, status) for fast balance queries
 
 -- withdrawal_requests
-id                uuid primary key,
+id                uuid primary key default gen_random_uuid(),
 recipient_type    text not null,
 recipient_id      uuid not null,
 amount            numeric not null,
@@ -68,8 +76,11 @@ status            text not null check (status in ('requested','processing','paid
 requested_at      timestamptz not null default now(),
 resolved_at       timestamptz
 
--- sync_queue_items   (offline cash transactions — evidence only, never enters payout pipeline)
-id                uuid primary key,
+-- sync_queue_items   (true offline/no-connectivity capture — a still-unbuilt future concern,
+-- distinct from cash-payment tracking, which now lives directly in `transactions` above via
+-- payment_method + the cash_* statuses. Do not repurpose this table for cash — it's for the
+-- separate case of no network at all, e.g. a fully offline PWA sync queue, if that gets built.)
+id                uuid primary key default gen_random_uuid(),
 payload           jsonb not null,
 idempotency_key   uuid unique not null,
 synced_at         timestamptz
@@ -83,12 +94,13 @@ One Supabase Storage bucket, `qr-codes` — public read, coordinator-only write.
 
 | Role | producers/drivers | transactions | wallet_ledger_entries | withdrawal_requests | admin actions |
 |---|---|---|---|---|---|
-| Tourist (anonymous) | — | create (via pay endpoint only) | — | — | — |
-| Producer | read own | read own | read own | create/read own | — |
-| Driver | read own | read own | read own | create/read own | — |
+| Tourist (anonymous) | — | create (via pay endpoint only) + confirm own cash txn (token-scoped) | — | — | — |
+| Producer/Driver | read own | read own + confirm own cash txn | read own | create/read own | — |
 | Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration |
 
 Enforced twice: Supabase RLS at the data layer, FastAPI endpoint checks at the API layer. A client can display its own balance; it can never write to it directly — only the FastAPI service, using the service-role key, writes to money-affecting tables.
+
+The tourist's cash-confirmation right above is scoped by a short-lived signed token tied to the transaction id, not by an account — she has none. Producer/Driver's cash-confirmation right is exercised from their authenticated dashboard session, same as any other read/write of their own rows.
 
 ## 4. Authentication flow
 
@@ -98,13 +110,15 @@ No public self-registration for any role. Accounts are created by the coordinato
 2. **Login** — the producer/driver enters phone + PIN on a thin FastAPI-fronted login screen, which verifies against Supabase Auth and returns a session.
 3. **Session** — the frontend holds the Supabase session token; reads against `producers`/`drivers`/`transactions`/`wallet_ledger_entries`/`withdrawal_requests` go directly to Supabase, scoped by RLS to that user's own `recipient_id`.
 4. **Coordinator/Admin login** — same Supabase Auth mechanism, but the account carries an `is_admin` claim, unlocking the reconciliation, registration, and dispute-resolution endpoints (checked at both the RLS and FastAPI layers).
-5. **Tourist** — no account, no session. The public pay endpoint is the only surface a tourist ever touches, and it's rate-limited per phone number rather than gated by login.
+5. **Tourist** — no account, no session. The public pay endpoint is the only surface a tourist ever touches, and it's rate-limited per phone number rather than gated by login. A Case B walk-up cash sale (no driver referral) needs her own confirmation too (CLAUDE.md section 4 rule 12) — that also needs no login: a short-lived signed token tied to the transaction id, delivered via whatever already shows her the payment-confirmation screen (an in-page "I paid" button if she's still there, or an SMS link if not). Do not require Supabase Auth for this — it would contradict "no account for tourists."
+6. **Cash confirmation taps for Producer/Driver** — a Case A referred cash sale needs both the driver's and the maker's confirmation, a Case B walk-up sale needs the maker's alongside the tourist's; both happen from the producer's/driver's already-authenticated dashboard session, via the same login as step 2.
 
-## 5. Money-movement sequence (STK → ledger → payout)
+## 5. Money-movement sequence (STK/cash → ledger → payout)
 
-1. `POST /transactions/initiate` — STK Push fires.
-2. `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` `wallet_ledger_entries` for maker (product_maker_amount + photo_amount, whichever are enabled) and, only if `product_enabled`, for the driver.
+1. `POST /transactions/initiate` — for `payment_method: mpesa`, STK Push fires. For `payment_method: cash`, no Daraja call — the transaction is created directly in `cash_unconfirmed` status with `confirmation_deadline` set (`created_at + CASH_CONFIRM_WINDOW_MINUTES`).
+2. **M-Pesa path:** `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` `wallet_ledger_entries` for maker (product_maker_amount + photo_amount, whichever are enabled) and, only if `product_enabled`, for the driver.
+2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` — called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B). Sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed` and the same `pending` ledger entries are written as in step 2 — from here, cash-derived entries flow through steps 3–6 identically to M-Pesa ones. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and no ledger entries are ever written for that transaction.
 3. Balance becomes `available` once cleared for payout eligibility.
 4. `POST /withdrawals/request` (on-demand, full balance, ≥ KES 500) **or** the 18:00 EAT APScheduler batch sweep — either path creates a `withdrawal_requests` row with a generated idempotency key and triggers Daraja B2C.
 5. `POST /daraja/b2c-callback` — marks the ledger entry `paid`, or on failure, returns funds to `available` (one automatic retry, then requires coordinator manual retry).
-6. `GET /admin/reconciliation` — Till collected vs. disbursed vs. pending, should always sum correctly.
+6. `GET /admin/reconciliation` — Till collected vs. disbursed vs. pending, should always sum correctly, including confirmed-cash entries.

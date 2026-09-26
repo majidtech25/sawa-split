@@ -10,13 +10,13 @@
 | Database | Supabase (managed Postgres + Auth + Realtime + Storage) | Same asyncpg connection path; Auth and Realtime replace custom build work |
 | Frontend | React + Vite + Tailwind, `HashRouter` | Matches prior deployment experience; avoids Render SPA-routing issue from day one |
 | Hosting | Render (both services) | Known-working deployment target |
-| Payments | Daraja STK Push (collection) + Daraja B2C (payout) | Only realistic M-Pesa integration path |
+| Payments | Daraja STK Push (collection) + Daraja B2C (payout) for M-Pesa; cash via an in-app dual-confirmation flow | Only realistic M-Pesa integration path; cash needed as a parallel first-class method, not an offline fallback |
 | Scheduling | In-process APScheduler inside the FastAPI service | Render's free tier has no native cron jobs |
 
 ## 2. Non-functional requirements
 
 - **Low-end device support:** primary UI must run acceptably on budget Android phones over patchy 2G/3G. No heavy web fonts pulled from full-family CDN loads without subsetting; minimize payload on the core payment flow.
-- **Offline tolerance:** the app must remain usable for logging a cash transaction with zero connectivity, queuing it locally (IndexedDB, not a service worker) for later sync.
+- **Cash dual confirmation:** a cash sale settles online, via both required parties tapping confirm (driver+maker for a referred sale, tourist+maker for a walk-up sale) — not via a self-reported offline log. An unconfirmed cash sale that misses its confirmation window expires visibly in the ledger rather than silently retrying or entering the payout pipeline. True offline/no-connectivity capture (IndexedDB-queued, synced later) remains a separate, unbuilt, still-hypothetical concern — not how cash is tracked.
 - **Idempotency:** every payout (on-demand or batch) carries a generated idempotency key; every Daraja webhook is checked against the transaction reference before writing — a duplicate delivery must be a no-op.
 - **Auditability:** wallet balances are never a single mutable field — they are computed from append-only ledger entries, so the maker-checker audit claim in the pitch is literally true.
 - **Security boundary:** clients read wallet/ledger data via Supabase Row Level Security (read-only); only the FastAPI service, using the service-role key, may write to money-affecting tables.
