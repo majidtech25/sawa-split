@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_service_role_key: str
     database_url: str
+    cash_confirm_window_minutes: int = 10
 
     @field_validator("supabase_url")
     @classmethod

@@ -7,11 +7,12 @@
 --     top-level claim in the session JWT for phone-authenticated users.
 --   - Coordinator: no domain row at all — just an auth.users account with
 --     app_metadata.is_admin = true, checked via public.is_admin() below.
---   - Tourist (Case B cash confirm, rule 12): a short-lived signed token carrying a
---     `cash_confirm_transaction_id` claim, scoped to exactly one transaction. The
---     policy below is real and live now; minting that token is stage 4 work (the
---     POST /transactions/:id/confirm endpoint) and needs the project's JWT signing
---     secret — not yet in CLAUDE.md section 11's env var list, flagged separately.
+--   - Tourist (Case B cash confirm, rule 12): the real path (stage 4's
+--     POST /transactions/:id/confirm) ended up using a stored opaque token
+--     (transactions.tourist_confirm_token, migration 0005) rather than a minted
+--     Supabase JWT claim, to avoid needing the project's raw JWT signing secret.
+--     The cash_confirm_transaction_id policy below is unused by that path but left
+--     in place as defense-in-depth for a hypothetical future direct-PostgREST route.
 
 create or replace function public.is_admin() returns boolean
 language sql stable
