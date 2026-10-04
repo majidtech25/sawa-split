@@ -13,3 +13,20 @@ Verify a migration's constraints actually hold (inserts one valid row per table,
 ```
 bash migrations/verify_0001.sh
 ```
+
+`DATABASE_URL` must be Supabase's **Session pooler** string (port 5432), not the
+Transaction pooler (port 6543) — the latter can't support prepared statements at
+all (SQLAlchemy's asyncpg dialect always issues real `PREPARE`s), which breaks
+`app/db.py` outright. See `app/db.py`'s comments for the full story, including an
+SSL-context construction gotcha that's easy to reintroduce.
+
+0002 adds RLS policies matching CLAUDE.md section 5's permission matrix, plus the
+`qr-codes` storage bucket (public read, coordinator-only write). Verify with:
+
+```
+bash migrations/verify_0002_rls.sh
+```
+
+This simulates each role via `SET ROLE` + `request.jwt.claims` (the same session
+variables PostgREST sets from a real JWT) rather than needing an actual publishable
+key or running server — seeds its own fixtures and cleans up after itself.
