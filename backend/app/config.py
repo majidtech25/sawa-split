@@ -12,6 +12,16 @@ class Settings(BaseSettings):
     database_url: str
     cash_confirm_window_minutes: int = 10
 
+    daraja_base_url: str = "https://sandbox.safaricom.co.ke"
+    daraja_consumer_key: str
+    daraja_consumer_secret: str
+    daraja_shortcode: str
+    daraja_passkey: str
+    daraja_b2c_shortcode: str
+    daraja_initiator_name: str
+    daraja_security_credential: str
+    daraja_callback_base_url: str
+
     @field_validator("supabase_url")
     @classmethod
     def _strip_path(cls, v: str) -> str:

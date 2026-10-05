@@ -72,3 +72,14 @@ async def write_ledger_entries(
             ),
             {"driver_id": driver_id, "amount": driver_amount, "txn_id": transaction_id},
         )
+
+    # Section 6 step 3: balance becomes available once cleared for payout eligibility.
+    # Neither CLAUDE.md nor the other docs define a separate clearing delay/condition,
+    # and M-Pesa/cash confirmation is itself the irreversible, completed event — so
+    # clearing happens immediately, as a second step right after the pending write
+    # (kept as two steps, not one combined insert, to match section 6's literal wording
+    # and leave 'pending' as a real, auditable — if momentary — state).
+    await session.execute(
+        text("update wallet_ledger_entries set status = 'available' where transaction_id = :txn_id and status = 'pending'"),
+        {"txn_id": transaction_id},
+    )

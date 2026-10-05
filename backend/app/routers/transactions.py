@@ -1,34 +1,29 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import supabase_auth
+from .. import daraja, supabase_auth
+from ..caller import normalize_phone
 from ..config import settings
 from ..db import get_session
 from ..ledger import compute_split, write_ledger_entries
-from ..security import require_admin
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 MIN_TRANSACTION_AMOUNT = Decimal("50")  # CLAUDE.md section 4 rule 5 — business floor, not Daraja's own KES 1 floor.
 
 
-def _normalize_phone(phone: str) -> str:
-    # Supabase Auth strips the leading '+' from phone claims; our tables store it with
-    # one (whatever the coordinator typed at onboarding) — normalize before comparing.
-    return phone.lstrip("+")
-
-
 class InitiateTransactionRequest(BaseModel):
     producer_id: str
     driver_id: str | None = None
     payment_method: Literal["mpesa", "cash"]
+    phone: str | None = None  # required for mpesa — where Daraja sends the STK prompt
     product_enabled: bool = False
     product_amount: Decimal | None = None
     photo_enabled: bool = False
@@ -46,6 +41,8 @@ class InitiateTransactionRequest(BaseModel):
             raise ValueError("photo_amount is required when photo_enabled.")
         if not self.photo_enabled and self.photo_amount is not None:
             raise ValueError("photo_amount must be omitted when photo is not enabled.")
+        if self.payment_method == "mpesa" and not self.phone:
+            raise ValueError("phone is required for payment_method 'mpesa' (where the STK prompt is sent).")
         return self
 
 
@@ -159,6 +156,33 @@ async def initiate_transaction(
     ).one()
     await session.commit()
 
+    if body.payment_method == "mpesa":
+        # CLAUDE.md rule 6: a failed/undeliverable STK push gets no ledger entry and no
+        # auto-retry — mark it failed immediately rather than leaving a dead "initiated"
+        # row waiting on a callback that will never arrive.
+        try:
+            stk_response = await daraja.stk_push(
+                phone=body.phone,
+                amount=split["total_amount"],
+                account_reference=str(row.id)[:12],
+                transaction_desc="Sawa Split payment",
+                callback_url=f"{settings.daraja_callback_base_url}/daraja/stk-callback",
+            )
+            if str(stk_response.get("ResponseCode")) != "0":
+                raise RuntimeError(stk_response.get("ResponseDescription", "STK push rejected"))
+        except Exception as exc:
+            await session.execute(
+                text("update transactions set status = 'failed' where id = :id"), {"id": row.id}
+            )
+            await session.commit()
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Could not initiate M-Pesa payment: {exc}") from exc
+
+        await session.execute(
+            text("update transactions set checkout_request_id = :crid where id = :id"),
+            {"crid": stk_response["CheckoutRequestID"], "id": row.id},
+        )
+        await session.commit()
+
     return InitiateTransactionResponse(
         id=str(row.id),
         status=txn_status,
@@ -178,52 +202,6 @@ async def initiate_transaction(
 class TransactionStateResponse(BaseModel):
     id: str
     status: str
-
-
-@router.post("/{transaction_id}/fake-confirm", response_model=TransactionStateResponse)
-async def fake_confirm(
-    transaction_id: str,
-    _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> TransactionStateResponse:
-    """Stands in for POST /daraja/stk-callback until stage 5's real Daraja integration —
-    coordinator-triggered only, since a real webhook would never be publicly callable."""
-    row = (
-        await session.execute(text("select * from transactions where id = :id"), {"id": transaction_id})
-    ).one_or_none()
-    if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Transaction not found")
-    if row.payment_method != "mpesa":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "fake-confirm only applies to mpesa transactions")
-    if row.status == "confirmed":
-        return TransactionStateResponse(id=str(row.id), status=row.status)  # idempotent, rule 7
-    if row.status != "initiated":
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot confirm a transaction in status '{row.status}'")
-
-    fake_receipt = "FAKE" + secrets.token_hex(4).upper()
-    updated = (
-        await session.execute(
-            text(
-                "update transactions set status = 'confirmed', stk_receipt = :receipt "
-                "where id = :id and status = 'initiated' returning *"
-            ),
-            {"receipt": fake_receipt, "id": transaction_id},
-        )
-    ).one_or_none()
-    if updated is None:
-        # Lost a race to a concurrent confirm — already handled, no-op.
-        return TransactionStateResponse(id=str(row.id), status="confirmed")
-
-    await write_ledger_entries(
-        session,
-        transaction_id=updated.id,
-        producer_id=updated.producer_id,
-        driver_id=updated.driver_id,
-        maker_amount=updated.maker_amount,
-        driver_amount=updated.driver_amount,
-    )
-    await session.commit()
-    return TransactionStateResponse(id=str(updated.id), status=updated.status)
 
 
 class ConfirmCashRequest(BaseModel):
@@ -266,13 +244,13 @@ async def confirm_cash(
         raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot confirm a transaction in status '{row.status}'")
 
     role: str
-    if authorization is not None:
+    if authorization is not None and authorization.removeprefix("Bearer ").strip():
         token = authorization.removeprefix("Bearer ").strip()
         try:
             user = await supabase_auth.get_user_from_token(token)
         except supabase_auth.SupabaseAuthError as exc:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token") from exc
-        caller_phone = _normalize_phone(user.get("phone") or "")
+        caller_phone = normalize_phone(user.get("phone") or "")
 
         producer = (
             await session.execute(text("select phone from producers where id = :id"), {"id": row.producer_id})
@@ -283,9 +261,9 @@ async def confirm_cash(
                 await session.execute(text("select phone from drivers where id = :id"), {"id": row.driver_id})
             ).one_or_none()
 
-        if producer is not None and _normalize_phone(producer.phone) == caller_phone:
+        if producer is not None and normalize_phone(producer.phone) == caller_phone:
             role = "maker"
-        elif driver is not None and _normalize_phone(driver.phone) == caller_phone:
+        elif driver is not None and normalize_phone(driver.phone) == caller_phone:
             role = "driver"
         else:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a party to this transaction")
