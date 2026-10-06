@@ -3,7 +3,7 @@
 **Status:** Locked for the pitch. This is the physical, click-by-click choreography behind the "live demo" beat already written into `Sawa_Split_Pitch_Script.pdf`'s Section 3 (Solution, 2–2.5 min). Read alongside that script, not instead of it — this file is the mechanics, the pitch script is the words.
 
 > **Every live STK Push costs real money.** Confirmed during stage 5: a sandbox STK Push to a real Safaricom number charged real money (KES 60, non-refundable). The demo price here is KSh 110 (product KSh 100 + photo consent KSh 10), so every dry run, rehearsal and live attempt costs the presenter KSh 110.
-> - **Narration must stay accurate.** Say that *the split is recorded and the payout is triggered*. Never say or imply that the maker received money: in sandbox, B2C only pays Safaricom's test number, never a real maker's or driver's phone.
+> - **Narration must stay accurate.** Say that *the split is recorded and each share is credited to their balance*. Never say or imply that the maker received money: in sandbox, B2C only pays Safaricom's test number, never a real maker's or driver's phone.
 > - **Prefer the recorded fallback (Section 5) over paid live retries.** If the first live attempt fails, cut to the recording as Section 4 says. Don't pay for a second attempt on stage.
 
 ## 1. Roles
@@ -33,7 +33,7 @@ Keyed to the pitch script's own stage directions in Section 3.
 5. Driver stays on Tab 1 until the confirmation screen lands — shown as the two separate component breakdowns (Product: maker/driver split; Photo consent: maker only), holds 2 seconds.
 6. Driver switches to **Tab 2** — the new row appears via Supabase Realtime, status flips pending → confirmed, the split is visible: maker's product share, driver referral, and the separate photo-consent line to the maker.
 7. **Pause. No narration over this moment** — the pitch script calls this out explicitly; let the ledger update speak for itself.
-8. Presenter: *"That transaction you just watched — the money is already split and recorded — each share is on its way. No one had to take our word for it."*
+8. Presenter: *"That transaction you just watched — the split is recorded and each share is credited to their balance. No one had to take our word for it."*
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 

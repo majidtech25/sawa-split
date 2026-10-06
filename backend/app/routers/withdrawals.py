@@ -1,26 +1,31 @@
-import uuid
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import daraja
+from .. import payouts
 from ..caller import resolve_producer_or_driver
-from ..config import settings
 from ..db import get_session
+from ..security import require_admin
 
 router = APIRouter(prefix="/withdrawals", tags=["withdrawals"])
-
-MIN_WITHDRAWAL_AMOUNT = Decimal("500")  # CLAUDE.md rule 9
+admin_router = APIRouter(prefix="/admin/withdrawals", tags=["admin"])
 
 
 class WithdrawalResponse(BaseModel):
     id: str
     status: str
     amount: Decimal
+    retry_of: str | None = None
+
+
+def _response(row) -> WithdrawalResponse:
+    return WithdrawalResponse(
+        id=str(row.id), status=row.status, amount=row.amount, retry_of=str(row.retry_of) if row.retry_of else None
+    )
 
 
 @router.post("/request", response_model=WithdrawalResponse, status_code=status.HTTP_201_CREATED)
@@ -28,85 +33,48 @@ async def request_withdrawal(
     session: Annotated[AsyncSession, Depends(get_session)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> WithdrawalResponse:
-    """On-demand withdrawal (CLAUDE.md rule 9: always full balance, never partial,
-    >= KES 500) triggering a real Daraja B2C payout. The daily 18:00 EAT sweep that
-    calls this same path automatically is stage 6 — this endpoint is what it will
-    call, built now so B2C's mechanics (section 6 steps 4-5) are actually exercised."""
+    """On-demand withdrawal (CLAUDE.md rule 9: always the full balance, >= KES 500)
+    via a real Daraja B2C payout. The one automatic retry on failure (rule 11) is
+    handled inside payouts.start_payout or by the B2C callback."""
     recipient_type, recipient_id = await resolve_producer_or_driver(session, authorization)
     recipient_type = "maker" if recipient_type == "producer" else "driver"
 
-    balance_row = (
-        await session.execute(
-            text(
-                "select coalesce(sum(amount), 0) as total from wallet_ledger_entries "
-                "where recipient_type = :rtype and recipient_id = :rid and status = 'available'"
-            ),
-            {"rtype": recipient_type, "rid": recipient_id},
-        )
-    ).one()
-    balance = balance_row.total
-    if balance < MIN_WITHDRAWAL_AMOUNT:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"Available balance (KES {balance}) is below the KES {MIN_WITHDRAWAL_AMOUNT} withdrawal threshold.",
-        )
-
-    in_flight = (
-        await session.execute(
-            text(
-                "select id from withdrawal_requests where recipient_type = :rtype and recipient_id = :rid "
-                "and status in ('requested', 'processing')"
-            ),
-            {"rtype": recipient_type, "rid": recipient_id},
-        )
-    ).one_or_none()
-    if in_flight is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "A withdrawal is already in progress.")
-
-    idempotency_key = uuid.uuid4()
-    row = (
-        await session.execute(
-            text(
-                """
-                insert into withdrawal_requests (recipient_type, recipient_id, amount, idempotency_key, status)
-                values (:rtype, :rid, :amount, :key, 'requested')
-                returning id
-                """
-            ),
-            {"rtype": recipient_type, "rid": recipient_id, "amount": balance, "key": idempotency_key},
-        )
-    ).one()
-    await session.commit()
-
-    phone_row = (
-        await session.execute(
-            text(f"select phone from {'producers' if recipient_type == 'maker' else 'drivers'} where id = :id"),
-            {"id": recipient_id},
-        )
-    ).one()
-
     try:
-        b2c_response = await daraja.b2c_payment(
-            phone=phone_row.phone,
-            amount=balance,
-            remarks="Sawa Split payout",
-            occasion="Payout",
-            result_url=f"{settings.daraja_callback_base_url}/daraja/b2c-callback",
-            timeout_url=f"{settings.daraja_callback_base_url}/daraja/b2c-timeout",
-            originator_conversation_id=str(idempotency_key),
-        )
-        if str(b2c_response.get("ResponseCode")) != "0":
-            raise RuntimeError(b2c_response.get("ResponseDescription", "B2C request rejected"))
-    except Exception as exc:
-        await session.execute(
-            text("update withdrawal_requests set status = 'failed', resolved_at = now() where id = :id"),
-            {"id": row.id},
-        )
-        await session.commit()
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Could not initiate payout: {exc}") from exc
+        row = await payouts.start_payout(session, recipient_type, recipient_id)
+    except payouts.PayoutRefused as exc:
+        code = status.HTTP_422_UNPROCESSABLE_ENTITY if "threshold" in str(exc) else status.HTTP_409_CONFLICT
+        raise HTTPException(code, str(exc)) from exc
 
-    await session.execute(
-        text("update withdrawal_requests set status = 'processing' where id = :id"), {"id": row.id}
-    )
-    await session.commit()
-    return WithdrawalResponse(id=str(row.id), status="processing", amount=balance)
+    if row.status == "failed":
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Could not start the M-Pesa payout, and the automatic retry also failed. "
+            "Your balance is unchanged; the coordinator can retry it.",
+        )
+    return _response(row)
+
+
+@admin_router.post("/{withdrawal_id}/retry", response_model=WithdrawalResponse, status_code=status.HTTP_201_CREATED)
+async def retry_withdrawal(
+    withdrawal_id: str,
+    _admin: Annotated[dict[str, Any], Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> WithdrawalResponse:
+    """Manual coordinator retry (rule 11) of a failed payout — normally one whose
+    automatic retry also failed, but any failed withdrawal qualifies, so a payout
+    whose automatic retry was refused can't get stuck. Pays the same amount again;
+    the failed withdrawal becomes 'retried'."""
+    failed = (
+        await session.execute(text("select * from withdrawal_requests where id = :id"), {"id": withdrawal_id})
+    ).one_or_none()
+    if failed is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Withdrawal not found")
+    if failed.status != "failed":
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Only a failed withdrawal can be retried (this one is '{failed.status}').")
+    try:
+        row = await payouts.retry_payout(session, failed.id, automatic=False)
+    except payouts.PayoutRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This withdrawal was already retried.")
+    return _response(row)

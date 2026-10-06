@@ -1,9 +1,10 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import payouts
 from ..db import get_session
 from ..ledger import write_ledger_entries
 
@@ -69,7 +70,9 @@ async def stk_callback(payload: dict[str, Any], session: Annotated[AsyncSession,
 
 
 @router.post("/b2c-callback")
-async def b2c_callback(payload: dict[str, Any], session: Annotated[AsyncSession, Depends(get_session)]) -> dict:
+async def b2c_callback(
+    payload: dict[str, Any], session: Annotated[AsyncSession, Depends(get_session)], background: BackgroundTasks
+) -> dict:
     """Real Daraja B2C result callback (CLAUDE.md section 6 step 5). Correlates back to
     withdrawal_requests via OriginatorConversationID, which we set to our own
     idempotency_key at request time — no extra column needed for that linkage."""
@@ -88,13 +91,14 @@ async def b2c_callback(payload: dict[str, Any], session: Annotated[AsyncSession,
 
     if str(result_code) != "0":
         # Rule 11: funds simply stay 'available' — they were never moved out of it,
-        # so "return to available" is automatic. The automatic-retry-then-manual
-        # escalation lives in stage 6 alongside the batch sweep.
+        # so "return to available" is automatic. The one automatic retry runs after
+        # this callback is acknowledged, so Daraja isn't kept waiting on a new B2C call.
         await session.execute(
             text("update withdrawal_requests set status = 'failed', resolved_at = now() where id = :id"),
             {"id": row.id},
         )
         await session.commit()
+        background.add_task(payouts.retry_after_callback_failure, row.id)
         return ACK
 
     params = {p["Key"]: p["Value"] for p in result.get("ResultParameters", {}).get("ResultParameter", [])}

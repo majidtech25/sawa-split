@@ -41,3 +41,7 @@ each real token's claims instead:
 ```
 bash migrations/verify_0007_rls_phone.sh
 ```
+
+0008 adds `withdrawal_requests.retry_of`, linking a payout retry to the failed
+withdrawal it replaces (rule 11: one automatic retry, then manual coordinator
+retries). Exercised end to end by `scripts/verify_stage6.sh`.
