@@ -48,6 +48,16 @@ You are the engineer implementing this MVP. Treat section 4 (business rules) and
 - Supabase Cloud enforces a **hard 6-character minimum password length that cannot be lowered**, even though the dashboard exposes a "Minimum password length" field that implies otherwise (confirmed: this is a managed-Cloud platform limit, not a config value — self-hosted GoTrue's `GOTRUE_PASSWORD_MIN_LENGTH` doesn't apply here). A 4-digit PIN can never be Supabase Auth's own password; see `app/routers/auth.py` / `auth_credentials` for how the PIN is decoupled from it.
 - This dev environment's network path to Supabase's pooler is itself slow/jittery (several seconds per connection, with an outright stall roughly 1 in 5 attempts) — bound every asyncpg connection with an explicit `timeout` (`app/db.py` uses 10s) so a bad network path fails fast and loud instead of hanging a request indefinitely. Expected to be a non-issue once deployed to Render's own network, but keep the timeout regardless as cheap insurance.
 
+## 2.1 Daraja sandbox findings — learned the hard way in stage 5
+
+- **Two different shortcodes.** B2C `PartyA` is **600979** (`DARAJA_B2C_SHORTCODE`). STK Push / C2B uses **174379** (`DARAJA_SHORTCODE`). Don't swap them.
+- **The B2C recipient must be 254708374149**, Safaricom's sandbox test MSISDN. Any other number fails with ResultCode **2040** ("Credit Party customer type … can't be supported"). That's why the stage-3 test producer's phone is 254708374149: a withdrawal pays the recipient's own phone.
+- **ResultCode 8006 means the initiator's security credential is locked.** Fix it by regenerating the credential in the Daraja portal's Test Credentials panel and pasting it into `DARAJA_SECURITY_CREDENTIAL`. Don't retry in a loop: every failed attempt against a locked initiator can extend the lock.
+- **In `.env`, keep comments on their own line.** A value like `DARAJA_B2C_SHORTCODE=600979# comment` loads as the whole string, comment included, and goes out as `PartyA`. This regressed twice.
+- **Running `backend/scripts/verify_stage5.sh`:** pipe it through `tee` only with `set -o pipefail`, otherwise tee's exit status hides failures. Before each rerun, reset the producer's KES 600 fixture ledger entry to `available`, because a passing run's real B2C payout marks it `paid`.
+- **A sandbox STK Push to a real phone number charges real money.** Confirmed: KES 60 was deducted and is not refundable. Safaricom's test MSISDN no longer reliably auto-completes STK, so a real number is the only reliable way to get a callback, and each attempt costs the full amount. The script's STK payer comes from `STK_PAYER_MSISDN` (`.env` only, never committed). Keep the test amount at the KES 50 + 10 minimum.
+- **B2C in sandbox only pays the test number**, so a sandbox payout never reaches a real producer's or driver's phone.
+
 ## 3. Database schema — exact shape (Supabase / Postgres)
 
 ```sql

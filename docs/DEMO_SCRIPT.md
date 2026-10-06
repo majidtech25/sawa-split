@@ -2,6 +2,10 @@
 
 **Status:** Locked for the pitch. This is the physical, click-by-click choreography behind the "live demo" beat already written into `Sawa_Split_Pitch_Script.pdf`'s Section 3 (Solution, 2–2.5 min). Read alongside that script, not instead of it — this file is the mechanics, the pitch script is the words.
 
+> **Every live STK Push costs real money.** Confirmed during stage 5: a sandbox STK Push to a real Safaricom number charged real money (KES 60, non-refundable). The demo price here is KSh 410, so every dry run, rehearsal and live attempt costs the presenter KSh 410.
+> - **Narration must stay accurate.** Say that *the split is recorded and the payout is triggered*. Never say or imply that the maker received money: in sandbox, B2C only pays Safaricom's test number, never a real maker's or driver's phone.
+> - **Prefer the recorded fallback (Section 5) over paid live retries.** If the first live attempt fails, cut to the recording as Section 4 says. Don't pay for a second attempt on stage.
+
 ## 1. Roles
 
 - **Presenter** — talks throughout, holds the printed price-transparency card and QR card as physical props, initiates the M-Pesa confirmation on their **own phone**. Never touches the laptop.
