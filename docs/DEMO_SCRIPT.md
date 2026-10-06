@@ -2,7 +2,7 @@
 
 **Status:** Locked for the pitch. This is the physical, click-by-click choreography behind the "live demo" beat already written into `Sawa_Split_Pitch_Script.pdf`'s Section 3 (Solution, 2–2.5 min). Read alongside that script, not instead of it — this file is the mechanics, the pitch script is the words.
 
-> **Every live STK Push costs real money.** Confirmed during stage 5: a sandbox STK Push to a real Safaricom number charged real money (KES 60, non-refundable). The demo price here is KSh 410, so every dry run, rehearsal and live attempt costs the presenter KSh 410.
+> **Every live STK Push costs real money.** Confirmed during stage 5: a sandbox STK Push to a real Safaricom number charged real money (KES 60, non-refundable). The demo price here is KSh 110 (product KSh 100 + photo consent KSh 10), so every dry run, rehearsal and live attempt costs the presenter KSh 110.
 > - **Narration must stay accurate.** Say that *the split is recorded and the payout is triggered*. Never say or imply that the maker received money: in sandbox, B2C only pays Safaricom's test number, never a real maker's or driver's phone.
 > - **Prefer the recorded fallback (Section 5) over paid live retries.** If the first live attempt fails, cut to the recording as Section 4 says. Don't pay for a second attempt on stage.
 
@@ -16,7 +16,7 @@ Rehearse this as a duet, not a solo with an assistant — the driver's judgment 
 ## 2. Pre-demo setup (before judges are seated)
 
 - Laptop connected to the projector; browser zoomed to ~150% so the price-transparency card and dashboard numbers read from the back of the room.
-- **Tab 1:** tourist payment-entry screen pre-loaded for "Talek gate · beadwork" — price-transparency card visible, showing the two locked components separately: Product KSh 380, Photo consent KSh 30, Total KSh 410.
+- **Tab 1:** tourist payment-entry screen pre-loaded for "Talek gate · beadwork" — price-transparency card visible, showing the two locked components separately: Product KSh 100 (maker KSh 70, driver referral KSh 30), Photo consent KSh 10 (maker only), Total KSh 110. These are the demo producer's real configured split (30% driver), so the card shows exactly what the STK Push charges and the ledger records.
 - **Tab 2:** coordinator reconciliation/dashboard view, already logged in, ledger table visible without scrolling.
 - **Tab 3 (hidden until needed):** the backup screen recording, cued to 0:00, paused, audio level checked.
 - Presenter's own Safaricom phone: charged, on vibrate (the buzz is part of the moment — don't mute it), M-Pesa PIN known cold. Confirm in a dry run *before* the event that this exact number is registered and receiving Daraja sandbox STK prompts reliably.
@@ -28,12 +28,12 @@ Keyed to the pitch script's own stage directions in Section 3.
 
 1. Presenter finishes the QR-card beat: *"This isn't a mockup. Watch."*
 2. Driver switches to **Tab 1** (already loaded — no navigating live).
-3. Driver clicks the phone number field, types the presenter's number, taps **Pay KSh 410**.
+3. Driver clicks the phone number field, types the presenter's number, taps **Pay KSh 110**.
 4. Presenter's phone buzzes (~2–4 sec). Presenter picks it up, enters their M-Pesa PIN — no need to hide this from the room, a PIN pad isn't sensitive to show, but keep the phone screen angled naturally away from the camera out of habit.
 5. Driver stays on Tab 1 until the confirmation screen lands — shown as the two separate component breakdowns (Product: maker/driver split; Photo consent: maker only), holds 2 seconds.
 6. Driver switches to **Tab 2** — the new row appears via Supabase Realtime, status flips pending → confirmed, the split is visible: maker's product share, driver referral, and the separate photo-consent line to the maker.
 7. **Pause. No narration over this moment** — the pitch script calls this out explicitly; let the ledger update speak for itself.
-8. Presenter: *"That transaction you just watched — the money already split. No one had to take our word for it."*
+8. Presenter: *"That transaction you just watched — the money is already split and recorded — each share is on its way. No one had to take our word for it."*
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 

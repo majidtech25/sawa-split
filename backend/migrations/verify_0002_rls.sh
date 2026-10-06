@@ -59,8 +59,8 @@ echo "== Seeding fixtures =="
 run_psql "insert into producers (id, name, phone, till, default_split_driver_pct, charges_product, charges_photo) values ('$PRODUCER_ID', 'RLS Test Producer', '$PRODUCER_PHONE', '000100', 30, true, false);" >/dev/null
 run_psql "insert into producers (id, name, phone, till, default_split_driver_pct, charges_product, charges_photo) values ('$OTHER_PRODUCER_ID', 'RLS Other Producer', '+254700000199', '000199', 30, true, false);" >/dev/null
 run_psql "insert into drivers (id, name, phone, till, qr_code) values ('$DRIVER_ID', 'RLS Test Driver', '+254700000101', '000101', 'QR-RLS-TEST');" >/dev/null
-run_psql "insert into transactions (id, producer_id, driver_id, payment_method, product_enabled, product_amount, product_maker_amount, product_driver_amount, total_amount, maker_amount, driver_amount, status) values ('$TXN_ID', '$PRODUCER_ID', '$DRIVER_ID', 'mpesa', true, 380, 266, 114, 380, 266, 114, 'confirmed');" >/dev/null
-run_psql "insert into wallet_ledger_entries (id, recipient_type, recipient_id, amount, status, transaction_id) values ('$LEDGER_ID', 'maker', '$PRODUCER_ID', 266, 'available', '$TXN_ID');" >/dev/null
+run_psql "insert into transactions (id, producer_id, driver_id, payment_method, product_enabled, product_amount, product_maker_amount, product_driver_amount, total_amount, maker_amount, driver_amount, status) values ('$TXN_ID', '$PRODUCER_ID', '$DRIVER_ID', 'mpesa', true, 100, 70, 30, 100, 70, 30, 'confirmed');" >/dev/null
+run_psql "insert into wallet_ledger_entries (id, recipient_type, recipient_id, amount, status, transaction_id) values ('$LEDGER_ID', 'maker', '$PRODUCER_ID', 70, 'available', '$TXN_ID');" >/dev/null
 
 echo
 echo "== producers: anon denied, owner sees self, coordinator sees all =="
@@ -100,7 +100,7 @@ check_count "unrelated phone sees nothing" "set role authenticated; set request.
 
 echo
 echo "== withdrawal_requests: owner can create own, not for someone else =="
-out=$(psql "$DATABASE_URL" -tAX -c "set role authenticated; set request.jwt.claims = '{\"phone\": \"$PRODUCER_PHONE\"}'; insert into withdrawal_requests (recipient_type, recipient_id, amount, idempotency_key, status) values ('maker', '$PRODUCER_ID', 266, gen_random_uuid(), 'requested');" 2>&1)
+out=$(psql "$DATABASE_URL" -tAX -c "set role authenticated; set request.jwt.claims = '{\"phone\": \"$PRODUCER_PHONE\"}'; insert into withdrawal_requests (recipient_type, recipient_id, amount, idempotency_key, status) values ('maker', '$PRODUCER_ID', 70, gen_random_uuid(), 'requested');" 2>&1)
 if echo "$out" | grep -q "INSERT 0 1"; then
   echo "PASS  owner can create their own withdrawal_request"
   PASS=$((PASS+1))

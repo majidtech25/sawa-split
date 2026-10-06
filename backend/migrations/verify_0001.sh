@@ -55,16 +55,16 @@ run_ok "insert producers" \
   "insert into producers (id, name, phone, till, site, default_split_driver_pct, charges_product, charges_photo) values ('$PRODUCER_ID', 'Wanjiru Beadwork', '+254700000001', '000001', 'Talek gate', 30, true, true);"
 
 run_ok "insert drivers" \
-  "insert into drivers (id, name, phone, till, qr_code) values ('$DRIVER_ID', 'James Driver', '+254700000002', '000002', 'QR-DRIVER-001');"
+  "insert into drivers (id, name, phone, till, qr_code) values ('$DRIVER_ID', 'James Driver', '+254700000002', '000002', 'QR-VERIFY-0001');"
 
 run_ok "insert transactions" \
-  "insert into transactions (id, producer_id, driver_id, payment_method, product_enabled, product_amount, product_maker_amount, product_driver_amount, photo_enabled, photo_amount, total_amount, maker_amount, driver_amount, status) values ('$TXN_ID', '$PRODUCER_ID', '$DRIVER_ID', 'mpesa', true, 380, 266, 114, true, 30, 410, 296, 114, 'confirmed');"
+  "insert into transactions (id, producer_id, driver_id, payment_method, product_enabled, product_amount, product_maker_amount, product_driver_amount, photo_enabled, photo_amount, total_amount, maker_amount, driver_amount, status) values ('$TXN_ID', '$PRODUCER_ID', '$DRIVER_ID', 'mpesa', true, 100, 70, 30, true, 10, 110, 80, 30, 'confirmed');"
 
 run_ok "insert wallet_ledger_entries" \
-  "insert into wallet_ledger_entries (id, recipient_type, recipient_id, amount, status, transaction_id) values ('$LEDGER_ID', 'maker', '$PRODUCER_ID', 296, 'pending', '$TXN_ID');"
+  "insert into wallet_ledger_entries (id, recipient_type, recipient_id, amount, status, transaction_id) values ('$LEDGER_ID', 'maker', '$PRODUCER_ID', 80, 'pending', '$TXN_ID');"
 
 run_ok "insert withdrawal_requests" \
-  "insert into withdrawal_requests (id, recipient_type, recipient_id, amount, idempotency_key, status) values ('$WITHDRAWAL_ID', 'maker', '$PRODUCER_ID', 296, gen_random_uuid(), 'requested');"
+  "insert into withdrawal_requests (id, recipient_type, recipient_id, amount, idempotency_key, status) values ('$WITHDRAWAL_ID', 'maker', '$PRODUCER_ID', 80, gen_random_uuid(), 'requested');"
 
 run_ok "insert sync_queue_items" \
   "insert into sync_queue_items (id, payload, idempotency_key) values ('$SYNC_ID', '{\"note\": \"manual verification row\"}'::jsonb, gen_random_uuid());"
