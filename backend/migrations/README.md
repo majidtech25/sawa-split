@@ -30,3 +30,14 @@ bash migrations/verify_0002_rls.sh
 This simulates each role via `SET ROLE` + `request.jwt.claims` (the same session
 variables PostgREST sets from a real JWT) rather than needing an actual publishable
 key or running server — seeds its own fixtures and cleans up after itself.
+
+0007 fixes 0002's phone matching: real Supabase session JWTs carry `phone` without
+the leading `+`, while `producers.phone` / `drivers.phone` store it with one, so every
+producer/driver JWT matched nothing under RLS. 0007 compares with the `+` stripped on
+both sides. `verify_0002_rls.sh` couldn't catch this — it hand-writes claims with the
+`+` — so 0007's check logs in through the API (server must be running) and replays
+each real token's claims instead:
+
+```
+bash migrations/verify_0007_rls_phone.sh
+```
