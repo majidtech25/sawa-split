@@ -3,6 +3,7 @@ import { HashRouter, Link, Navigate, NavLink, Route, Routes, useNavigate } from 
 import Home from "./pages/Home"
 import LoginPage from "./pages/LoginPage"
 import { CheckoutPage, PriceCardPage } from "./pages/PayPage"
+import DashboardPage from "./pages/DashboardPage"
 import ReceiptPage from "./pages/ReceiptPage"
 import ReconciliationPage from "./pages/ReconciliationPage"
 import { currentProfile, endSession, supabase } from "./lib/supabase"
@@ -81,6 +82,15 @@ function CoordinatorScreen({ children }) {
   )
 }
 
+function MemberScreen({ children }) {
+  return (
+    <RequireRole roles={["producer", "driver"]}>
+      <AppHeader signedIn />
+      {children}
+    </RequireRole>
+  )
+}
+
 // HashRouter, not Render's _redirects (CLAUDE.md section 2).
 export default function App() {
   return (
@@ -91,6 +101,7 @@ export default function App() {
         <Route path="/pay/:producerId/checkout" element={<TouristScreen><CheckoutPage /></TouristScreen>} />
         <Route path="/receipt/:transactionId" element={<TouristScreen><ReceiptPage /></TouristScreen>} />
         <Route path="/login" element={<TouristScreen><LoginPage /></TouristScreen>} />
+        <Route path="/dashboard" element={<MemberScreen><DashboardPage /></MemberScreen>} />
         <Route path="/coordinator" element={<CoordinatorScreen><ReconciliationPage /></CoordinatorScreen>} />
       </Routes>
     </HashRouter>
