@@ -5,7 +5,8 @@ import LoginPage from "./pages/LoginPage"
 import { CheckoutPage, PriceCardPage } from "./pages/PayPage"
 import DashboardPage from "./pages/DashboardPage"
 import ReceiptPage from "./pages/ReceiptPage"
-import ReconciliationPage from "./pages/ReconciliationPage"
+import CoordinatorPage from "./pages/CoordinatorPage"
+import RegisterPage from "./pages/RegisterPage"
 import { currentProfile, endSession, supabase } from "./lib/supabase"
 
 const focusRing =
@@ -102,7 +103,8 @@ export default function App() {
         <Route path="/receipt/:transactionId" element={<TouristScreen><ReceiptPage /></TouristScreen>} />
         <Route path="/login" element={<TouristScreen><LoginPage /></TouristScreen>} />
         <Route path="/dashboard" element={<MemberScreen><DashboardPage /></MemberScreen>} />
-        <Route path="/coordinator" element={<CoordinatorScreen><ReconciliationPage /></CoordinatorScreen>} />
+        <Route path="/coordinator" element={<CoordinatorScreen><CoordinatorPage /></CoordinatorScreen>} />
+        <Route path="/coordinator/register" element={<CoordinatorScreen><RegisterPage /></CoordinatorScreen>} />
       </Routes>
     </HashRouter>
   )
