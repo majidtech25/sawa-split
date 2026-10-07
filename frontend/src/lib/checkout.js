@@ -11,18 +11,20 @@ export function checkoutQuery(search) {
 
 export function useCheckout(producerId, search) {
   const query = checkoutQuery(search)
-  const [state, setState] = useState({ loading: true, checkout: null, error: null })
+  const key = `${producerId}?${query}`
+  const [result, setResult] = useState({ key: null, checkout: null, error: null })
   useEffect(() => {
     let live = true
-    setState({ loading: true, checkout: null, error: null })
     api(`/public/checkout/${encodeURIComponent(producerId)}?${query}`)
-      .then((checkout) => live && setState({ loading: false, checkout, error: null }))
-      .catch((error) => live && setState({ loading: false, checkout: null, error: error.message }))
+      .then((checkout) => live && setResult({ key, checkout, error: null }))
+      .catch((error) => live && setResult({ key, checkout: null, error: error.message }))
     return () => {
       live = false
     }
-  }, [producerId, query])
-  return state
+  }, [producerId, query, key])
+  // A result for a different stall or price is stale: show loading until this one arrives.
+  if (result.key !== key) return { loading: true, checkout: null, error: null }
+  return { loading: false, checkout: result.checkout, error: result.error }
 }
 
 // Shapes the API's checkout (or a receipt) into PriceTransparencyCard's props: one

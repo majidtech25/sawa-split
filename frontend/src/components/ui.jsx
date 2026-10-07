@@ -136,3 +136,15 @@ export function VerifiedStamp({ amount, at, place }) {
     </div>
   )
 }
+
+export function LiveIndicator({ live }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[13px] text-sawa-text-muted">
+      <span
+        aria-hidden="true"
+        className={`size-2 rounded-full ${live ? "bg-sawa-green motion-safe:animate-pulse" : "bg-sawa-border"}`}
+      />
+      {live ? "Live" : "Connecting…"}
+    </span>
+  )
+}

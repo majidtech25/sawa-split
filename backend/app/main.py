@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routers import auth, daraja, public, transactions, withdrawals
+from .routers import admin, auth, daraja, public, transactions, withdrawals
 from .scheduler import build_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -32,6 +32,7 @@ app.include_router(daraja.router)
 app.include_router(withdrawals.router)
 app.include_router(withdrawals.admin_router)
 app.include_router(public.router)
+app.include_router(admin.router)
 
 
 @app.get("/")
