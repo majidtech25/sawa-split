@@ -12,8 +12,8 @@ _token_cache: dict[str, Any] = {"token": None, "expires_at": 0.0}
 
 
 def format_phone(phone: str) -> str:
-    """Daraja wants 254XXXXXXXXX — no '+', no leading 0."""
-    digits = phone.lstrip("+")
+    """Daraja wants 254XXXXXXXXX — no '+', no leading 0, no spaces or dashes."""
+    digits = "".join(ch for ch in phone if ch.isdigit())
     if digits.startswith("0"):
         digits = "254" + digits[1:]
     elif digits.startswith("7") or digits.startswith("1"):

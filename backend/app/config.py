@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     daraja_security_credential: str
     daraja_callback_base_url: str
 
+    # Comma-separated browser origins allowed to call the API (the frontend's URL).
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
     @field_validator("supabase_url")
     @classmethod
     def _strip_path(cls, v: str) -> str:

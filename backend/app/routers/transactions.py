@@ -1,4 +1,6 @@
 import secrets
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Annotated, Literal
@@ -17,6 +19,27 @@ from ..ledger import compute_split, write_ledger_entries
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 MIN_TRANSACTION_AMOUNT = Decimal("50")  # CLAUDE.md section 4 rule 5 — business floor, not Daraja's own KES 1 floor.
+
+
+# CLAUDE.md section 5: the public pay-initiate endpoint is rate-limited per phone
+# number, so nobody can flood a stranger's phone with STK prompts. In-process memory
+# is enough for the one API process this runs as (app/scheduler.py says why one).
+STK_LIMIT_PER_PHONE = 5
+STK_LIMIT_WINDOW_SECONDS = 600
+_stk_attempts: dict[str, deque] = defaultdict(deque)
+
+
+def _check_stk_rate_limit(phone: str) -> None:
+    now = time.monotonic()
+    attempts = _stk_attempts[normalize_phone(phone).removeprefix("0")[-9:]]
+    while attempts and now - attempts[0] > STK_LIMIT_WINDOW_SECONDS:
+        attempts.popleft()
+    if len(attempts) >= STK_LIMIT_PER_PHONE:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many payment requests to this phone number. Wait a few minutes, then try again.",
+        )
+    attempts.append(now)
 
 
 class InitiateTransactionRequest(BaseModel):
@@ -107,6 +130,7 @@ async def initiate_transaction(
     confirmation_deadline = None
     tourist_confirm_token = None
     if body.payment_method == "mpesa":
+        _check_stk_rate_limit(body.phone)
         txn_status = "initiated"
     else:
         txn_status = "cash_unconfirmed"
