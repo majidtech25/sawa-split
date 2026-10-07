@@ -3,10 +3,15 @@ import time
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from .config import settings
+
+# Daraja reads the STK password timestamp as Kenyan time (EAT), whatever clock the
+# server runs on (Render is UTC).
+EAT = ZoneInfo("Africa/Nairobi")
 
 _token_cache: dict[str, Any] = {"token": None, "expires_at": 0.0}
 
@@ -46,7 +51,7 @@ async def stk_push(
     *, phone: str, amount: Decimal, account_reference: str, transaction_desc: str, callback_url: str
 ) -> dict[str, Any]:
     token = await get_access_token()
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    timestamp = datetime.now(EAT).strftime("%Y%m%d%H%M%S")
     password = base64.b64encode(
         f"{settings.daraja_shortcode}{settings.daraja_passkey}{timestamp}".encode()
     ).decode()
