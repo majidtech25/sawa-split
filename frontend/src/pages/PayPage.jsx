@@ -70,6 +70,7 @@ export function CheckoutPage() {
       product_amount: checkout.product ? checkout.product.amount : null,
       photo_enabled: Boolean(checkout.photo),
       photo_amount: checkout.photo ? checkout.photo.amount : null,
+      link_sig: search.get("sig"),
     }
   }
 

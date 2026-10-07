@@ -28,6 +28,9 @@ WITHDRAWAL_ID=""
 PASS=0
 FAIL=0
 
+# Price-card links are signed (app/links.py); sign each test sale's stall, prices and driver.
+sig() { PYTHONPATH=. .venv/bin/python scripts/sign_link.py --sig "$@"; }
+
 login() {
   curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" \
     -d "{\"phone\":\"$1\",\"pin\":\"$2\"}"
@@ -62,13 +65,14 @@ DRIVER_LOGIN=$(login "$DRIVER_PHONE" "$DRIVER_PIN")
 PRODUCER_TOKEN=$(echo "$PRODUCER_LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))")
 PRODUCER_ID=$(echo "$PRODUCER_LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin).get('producer_id',''))")
 DRIVER_ID=$(echo "$DRIVER_LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin).get('driver_id',''))")
+DRIVER_QR=$(psql "$DATABASE_URL" -tAc "select qr_code from drivers where id = '$DRIVER_ID';")
 [ -n "$PRODUCER_TOKEN" ] && [ -n "$PRODUCER_ID" ] && [ -n "$DRIVER_ID" ] || { echo "FATAL: could not log in fixtures — run this after stage 3's accounts exist."; exit 1; }
 
 echo
 echo "== Test 1: real STK push (product+photo, with driver) =="
 echo ">>> Sending STK push to ${STK_PAYER_MSISDN:0:6}***${STK_PAYER_MSISDN: -3} now — enter the M-Pesa PIN when the prompt arrives."
 TXN=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
-  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"mpesa\",\"phone\":\"$STK_PAYER_MSISDN\",\"product_enabled\":true,\"product_amount\":50,\"photo_enabled\":true,\"photo_amount\":10}")
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"mpesa\",\"phone\":\"$STK_PAYER_MSISDN\",\"product_enabled\":true,\"product_amount\":50,\"photo_enabled\":true,\"photo_amount\":10,\"link_sig\":\"$(sig "$PRODUCER_ID" 50 10 "$DRIVER_QR")\"}")
 echo "$TXN"
 TXN_ID=$(echo "$TXN" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 check "initiate: accepted, status initiated" "$(echo "$TXN" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")" "initiated"

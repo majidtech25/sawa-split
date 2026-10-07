@@ -20,6 +20,9 @@ DRIVER_PIN="${DRIVER_PIN:-2222}"
 PASS=0
 FAIL=0
 
+# Price-card links are signed (app/links.py); sign each test sale's stall, prices and driver.
+sig() { PYTHONPATH=. .venv/bin/python scripts/sign_link.py --sig "$@"; }
+
 login() {
   curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" \
     -d "{\"phone\":\"$1\",\"pin\":\"$2\"}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))"
@@ -44,11 +47,12 @@ DRIVER_TOKEN=$(login "$DRIVER_PHONE" "$DRIVER_PIN")
 # Resolve producer_id / driver_id from their own login responses.
 PRODUCER_ID=$(curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "{\"phone\":\"$PRODUCER_PHONE\",\"pin\":\"$PRODUCER_PIN\"}" | python3 -c "import json,sys; print(json.load(sys.stdin)['producer_id'])")
 DRIVER_ID=$(curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "{\"phone\":\"$DRIVER_PHONE\",\"pin\":\"$DRIVER_PIN\"}" | python3 -c "import json,sys; print(json.load(sys.stdin)['driver_id'])")
+DRIVER_QR=$(psql "$DATABASE_URL" -tAc "select qr_code from drivers where id = '$DRIVER_ID';")
 
 echo
 echo "== Test 1: Case A cash (driver + maker) =="
 TXN1=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
-  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":200}")
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":200,\"link_sig\":\"$(sig "$PRODUCER_ID" 200 - "$DRIVER_QR")\"}")
 TXN1_ID=$(echo "$TXN1" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 check "Case A: created cash_unconfirmed" "$(echo "$TXN1" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")" "cash_unconfirmed"
 
@@ -62,7 +66,7 @@ check "Case A: ledger entries land directly in 'available'" "$LEDGER_STATUSES" "
 echo
 echo "== Test 2: Case B cash (tourist + maker, no driver) =="
 TXN2=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
-  -d "{\"producer_id\":\"$PRODUCER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":150,\"photo_enabled\":true,\"photo_amount\":20}")
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":150,\"photo_enabled\":true,\"photo_amount\":20,\"link_sig\":\"$(sig "$PRODUCER_ID" 150 20)\"}")
 TXN2_ID=$(echo "$TXN2" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 TOURIST_TOKEN=$(echo "$TXN2" | python3 -c "import json,sys; print(json.load(sys.stdin)['tourist_confirm_token'])")
 check "Case B: product_driver_amount is 0 (no driver)" "$(echo "$TXN2" | python3 -c "import json,sys; print(json.load(sys.stdin)['product_driver_amount'])")" "0"
@@ -78,7 +82,7 @@ check "Case B: maker completes it" "$(echo "$R" | python3 -c "import json,sys; p
 echo
 echo "== Test 3: expired cash transaction writes no ledger entries =="
 TXN3=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
-  -d "{\"producer_id\":\"$PRODUCER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":100}")
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":100,\"link_sig\":\"$(sig "$PRODUCER_ID" 100 -)\"}")
 TXN3_ID=$(echo "$TXN3" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 TOURIST_TOKEN3=$(echo "$TXN3" | python3 -c "import json,sys; print(json.load(sys.stdin)['tourist_confirm_token'])")
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "update transactions set confirmation_deadline = now() - interval '1 minute' where id = '$TXN3_ID';" >/dev/null

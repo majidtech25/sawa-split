@@ -10,7 +10,7 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import daraja, supabase_auth
+from .. import daraja, links, supabase_auth
 from ..caller import normalize_phone
 from ..config import settings
 from ..db import get_session
@@ -51,6 +51,9 @@ class InitiateTransactionRequest(BaseModel):
     product_amount: Decimal | None = None
     photo_enabled: bool = False
     photo_amount: Decimal | None = None
+    # The price card's link signature (app/links.py): the stall, prices and driver
+    # being paid for must be exactly the ones the API signed.
+    link_sig: str | None = None
 
     @model_validator(mode="after")
     def _validate_components(self):
@@ -107,14 +110,25 @@ async def initiate_transaction(
     if body.photo_enabled and not producer.charges_photo:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This producer does not charge for photo consent.")
 
+    driver_qr = None
     if body.driver_id is not None:
         driver = (
-            await session.execute(text("select active from drivers where id = :id"), {"id": body.driver_id})
+            await session.execute(text("select active, qr_code from drivers where id = :id"), {"id": body.driver_id})
         ).one_or_none()
         if driver is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found")
         if not driver.active:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Driver is inactive")
+        driver_qr = driver.qr_code
+
+    if not links.is_valid(
+        body.link_sig,
+        body.producer_id,
+        body.product_amount if body.product_enabled else None,
+        body.photo_amount if body.photo_enabled else None,
+        driver_qr,
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, links.INVALID_CARD)
 
     split = compute_split(
         product_amount=body.product_amount,

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import links
 from ..db import get_session
 from ..ledger import compute_split
 from .transactions import MIN_TRANSACTION_AMOUNT
@@ -52,11 +53,21 @@ async def checkout(
     product: Annotated[Decimal | None, Query(gt=0)] = None,
     photo: Annotated[Decimal | None, Query(gt=0)] = None,
     driver_qr: str | None = None,
+    sig: str | None = None,
 ) -> CheckoutResponse:
     """The price-transparency card's data, computed by the same split the ledger
-    uses, so the card shows exactly what will be charged and recorded. Rejects an
-    inactive producer or an unregistered/inactive driver QR here, at scan time,
-    before any payment starts (rule 8)."""
+    uses, so the card shows exactly what will be charged and recorded. Only a link
+    signed by the API (app/links.py) is accepted, so nobody can edit its prices or
+    driver. Rejects an inactive producer or an unregistered/inactive driver QR here,
+    at scan time, before any payment starts (rule 8)."""
+    if not links.is_valid(sig, producer_id, product, photo, driver_qr):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, links.INVALID_CARD)
+    return await build_checkout(session, producer_id, product, photo, driver_qr)
+
+
+async def build_checkout(session: AsyncSession, producer_id: str, product, photo, driver_qr) -> CheckoutResponse:
+    """Validates a stall, its prices and driver, and computes the card. Shared by the
+    public checkout and the coordinator's price-card generator."""
     producer = (
         await session.execute(
             text(

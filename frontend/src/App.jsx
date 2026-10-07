@@ -6,6 +6,7 @@ import { CheckoutPage, PriceCardPage } from "./pages/PayPage"
 import DashboardPage from "./pages/DashboardPage"
 import ReceiptPage from "./pages/ReceiptPage"
 import CoordinatorPage from "./pages/CoordinatorPage"
+import PriceCardsPage from "./pages/PriceCardsPage"
 import RegisterPage from "./pages/RegisterPage"
 import { currentProfile, endSession, supabase } from "./lib/supabase"
 
@@ -40,12 +41,15 @@ function AppHeader({ wide = false, nav = null, signedIn = false }) {
 function CoordinatorNav() {
   const link = ({ isActive }) => `${focusRing} ${isActive ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"}`
   return (
-    <nav aria-label="Coordinator" className="flex gap-4">
+    <nav aria-label="Coordinator" className="flex flex-wrap gap-x-4 gap-y-1">
       <NavLink to="/coordinator" end className={link}>
         Reconciliation
       </NavLink>
       <NavLink to="/coordinator/register" className={link}>
         Register
+      </NavLink>
+      <NavLink to="/coordinator/price-cards" className={link}>
+        Price cards
       </NavLink>
     </nav>
   )
@@ -105,6 +109,7 @@ export default function App() {
         <Route path="/dashboard" element={<MemberScreen><DashboardPage /></MemberScreen>} />
         <Route path="/coordinator" element={<CoordinatorScreen><CoordinatorPage /></CoordinatorScreen>} />
         <Route path="/coordinator/register" element={<CoordinatorScreen><RegisterPage /></CoordinatorScreen>} />
+        <Route path="/coordinator/price-cards" element={<CoordinatorScreen><PriceCardsPage /></CoordinatorScreen>} />
       </Routes>
     </HashRouter>
   )

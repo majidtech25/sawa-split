@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
 import { api } from "./api"
 
-// The printed card's QR carries the stall and its prices: #/pay/<producerId>?product=100&photo=10&driver=<QR code>.
+// The printed card's QR carries the stall and its prices: #/pay/<producerId>?product=100&photo=10&driver=<QR code>&sig=<signature>.
 export function checkoutQuery(search) {
   const q = new URLSearchParams()
   for (const key of ["product", "photo"]) if (search.get(key)) q.set(key, search.get(key))
   if (search.get("driver")) q.set("driver_qr", search.get("driver"))
+  // The API signs each card's link so its prices and driver can't be edited.
+  if (search.get("sig")) q.set("sig", search.get("sig"))
   return q.toString()
 }
 

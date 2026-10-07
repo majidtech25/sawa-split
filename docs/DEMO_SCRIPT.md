@@ -16,7 +16,11 @@ Rehearse this as a duet, not a solo with an assistant — the driver's judgment 
 ## 2. Pre-demo setup (before judges are seated)
 
 - Laptop connected to the projector; browser zoomed to ~150% so the price-transparency card and dashboard numbers read from the back of the room.
-- **Tab 1:** tourist payment-entry screen pre-loaded for "Talek gate · beadwork" — price-transparency card visible, showing the two locked components separately: Product KSh 100 (maker KSh 70, driver referral KSh 30), Photo consent KSh 10 (maker only), Total KSh 110. These are the demo producer's real configured split (30% driver), so the card shows exactly what the STK Push charges and the ledger records.
+- **Tab 1:** tourist payment-entry screen pre-loaded for "Talek gate · beadwork" from the signed demo link below (append it to the deployed frontend URL):
+  - Payment entry (Tab 1): `#/pay/5ca4e79d-b462-4417-bd12-bd61eb9c1e10/checkout?product=100&photo=10&driver=QR-DRIVER-001&sig=4f2bb7cd0c75bedd91dbc67e6edb625121a1f32b190c5262354ee2cf5bef3bac`
+  - Price card first (the homepage's "See it work" button): `#/pay/5ca4e79d-b462-4417-bd12-bd61eb9c1e10?product=100&photo=10&driver=QR-DRIVER-001&sig=4f2bb7cd0c75bedd91dbc67e6edb625121a1f32b190c5262354ee2cf5bef3bac`
+  - Price-card links are signed with the backend's `CHECKOUT_LINK_SECRET`, so this link only works against an API using the same secret it was signed with. If the secret, producer, prices or driver change, make a new link from the coordinator's Price cards screen. Changing any value in the link by hand makes the card show "This price card isn't valid — ask the seller for a new one."
+  - The price-transparency card shows the two locked components separately: Product KSh 100 (maker KSh 70, driver referral KSh 30), Photo consent KSh 10 (maker only), Total KSh 110. These are the demo producer's real configured split (30% driver), so the card shows exactly what the STK Push charges and the ledger records.
 - **Tab 2:** coordinator reconciliation/dashboard view, already logged in, ledger table visible without scrolling.
 - **Tab 3 (hidden until needed):** the backup screen recording, cued to 0:00, paused, audio level checked.
 - Presenter's own Safaricom phone: charged, on vibrate (the buzz is part of the moment — don't mute it), M-Pesa PIN known cold. Confirm in a dry run *before* the event that this exact number is registered and receiving Daraja sandbox STK prompts reliably.

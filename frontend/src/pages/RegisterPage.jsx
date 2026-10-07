@@ -131,10 +131,7 @@ export default function RegisterPage() {
             <Check aria-hidden="true" className="size-4" /> {done.name} is registered
           </p>
           {done.role === "producer" && (
-            <p className="mt-2 text-[13px] text-sawa-text-muted">
-              Their price card link:{" "}
-              <code className="break-all font-mono text-sawa-text">#/pay/{done.id}?product=PRICE&amp;photo=PRICE</code>
-            </p>
+            <p className="mt-2 text-[13px] text-sawa-text-muted">Next, make their signed price card under Price cards.</p>
           )}
           {done.qrImage && (
             <div className="mt-3 flex flex-col items-center gap-2">

@@ -29,6 +29,9 @@ COORDINATOR_PIN="${COORDINATOR_PIN:-9999}"
 
 PASS=0
 FAIL=0
+
+# Price-card links are signed (app/links.py); sign each test sale's stall, prices and driver.
+sig() { PYTHONPATH=. .venv/bin/python scripts/sign_link.py --sig "$@"; }
 TXN_IDS=()
 
 q() { psql "$DATABASE_URL" -tAc "$1"; }
@@ -76,6 +79,7 @@ PRODUCER_TOKEN=$(echo "$PRODUCER_LOGIN" | json "['access_token']")
 PRODUCER_ID=$(echo "$PRODUCER_LOGIN" | json "['producer_id']")
 DRIVER_TOKEN=$(echo "$DRIVER_LOGIN" | json "['access_token']")
 DRIVER_ID=$(echo "$DRIVER_LOGIN" | json "['driver_id']")
+DRIVER_QR=$(psql "$DATABASE_URL" -tAc "select qr_code from drivers where id = '$DRIVER_ID';")
 COORD_TOKEN=$(echo "$COORD_LOGIN" | json "['access_token']")
 [ -n "$PRODUCER_TOKEN" ] && [ -n "$DRIVER_TOKEN" ] && [ -n "$COORD_TOKEN" ] || { echo "FATAL: could not log in the stage-3 fixtures."; exit 1; }
 
@@ -88,7 +92,7 @@ trap cleanup EXIT
 echo
 echo "== Setup: cash Case A sale, product 2000 + photo 10 (maker 1410, driver 600) =="
 TXN=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
-  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":2000,\"photo_enabled\":true,\"photo_amount\":10}")
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":2000,\"photo_enabled\":true,\"photo_amount\":10,\"link_sig\":\"$(sig "$PRODUCER_ID" 2000 10 "$DRIVER_QR")\"}")
 TXN_ID=$(echo "$TXN" | json "['id']")
 [ -n "$TXN_ID" ] || { echo "FATAL: could not create the cash sale: $TXN"; exit 1; }
 TXN_IDS+=("$TXN_ID")
@@ -162,7 +166,7 @@ check "driver funds still 'available'" "$(q "select status from wallet_ledger_en
 echo
 echo "== Test 6: unconfirmed cash past its deadline expires (rule 12) =="
 EXP=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
-  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":100,\"photo_enabled\":true,\"photo_amount\":10}")
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":100,\"photo_enabled\":true,\"photo_amount\":10,\"link_sig\":\"$(sig "$PRODUCER_ID" 100 10 "$DRIVER_QR")\"}")
 EXP_ID=$(echo "$EXP" | json "['id']")
 TXN_IDS+=("$EXP_ID")
 # Move the deadline into the past rather than waiting out the real 10-minute window.

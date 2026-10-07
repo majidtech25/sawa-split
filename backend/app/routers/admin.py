@@ -1,6 +1,7 @@
 """Coordinator-only: reconciliation (CLAUDE.md section 6 step 6) and disputes (rule 13)."""
 
 from decimal import Decimal
+from urllib.parse import urlencode
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,7 +9,9 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import links
 from ..db import get_session
+from .public import build_checkout
 from ..security import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -230,3 +233,35 @@ async def clear_dispute(
     await session.execute(text("update transactions set status = :s where id = :id"), {"s": restored, "id": transaction_id})
     await session.commit()
     return DisputeResponse(id=transaction_id, status=restored, ledger_entries_changed=thawed.rowcount)
+
+
+class PriceCardRequest(BaseModel):
+    producer_id: str
+    product_amount: Decimal | None = None
+    photo_amount: Decimal | None = None
+    driver_qr: str | None = None
+
+
+class PriceCardResponse(BaseModel):
+    path: str            # the frontend route, e.g. /pay/<id>?product=100&photo=10&driver=...&sig=...
+    total_amount: Decimal
+
+
+@router.post("/price-cards", response_model=PriceCardResponse)
+async def create_price_card(
+    body: PriceCardRequest,
+    _admin: Annotated[dict[str, Any], Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PriceCardResponse:
+    """Signs a price card's link (app/links.py) after the same checks the public
+    checkout runs, so only a card that would actually work gets printed."""
+    checkout = await build_checkout(session, body.producer_id, body.product_amount, body.photo_amount, body.driver_qr)
+    params = {}
+    if body.product_amount is not None:
+        params["product"] = f"{body.product_amount:f}"
+    if body.photo_amount is not None:
+        params["photo"] = f"{body.photo_amount:f}"
+    if body.driver_qr:
+        params["driver"] = body.driver_qr
+    params["sig"] = links.sign(body.producer_id, body.product_amount, body.photo_amount, body.driver_qr)
+    return PriceCardResponse(path=f"/pay/{body.producer_id}?{urlencode(params)}", total_amount=checkout.total_amount)

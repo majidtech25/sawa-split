@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     daraja_security_credential: str
     daraja_callback_base_url: str
 
+    # HMAC key for price-card links (app/links.py). Changing it invalidates every
+    # printed card, so the same value must be set wherever the API runs.
+    checkout_link_secret: str
+
     # Comma-separated browser origins allowed to call the API (the frontend's URL).
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
