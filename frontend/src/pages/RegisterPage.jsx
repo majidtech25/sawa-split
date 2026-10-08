@@ -3,6 +3,8 @@ import QRCode from "qrcode"
 import { Check } from "lucide-react"
 import { ErrorNote, Field, Screen, SecondaryButton } from "../components/ui"
 import { api } from "../lib/api"
+import { APP_URL } from "../lib/appUrl"
+import { QR_OPTIONS, driverQrFile, driverQrUrl } from "../lib/driverQr"
 import { supabase } from "../lib/supabase"
 
 const focusRing =
@@ -82,12 +84,13 @@ export default function RegisterPage() {
       let qrImage = null
       let qrStored = null
       if (role === "driver") {
-        // The QR encodes the driver's code; it's stored in the qr-codes bucket
-        // (public read, coordinator-only write) for printing and laminating.
-        qrImage = await QRCode.toDataURL(qrCode, { width: 480, margin: 2, color: { dark: "#1A1A1A", light: "#FFFFFF" } })
+        // The QR opens the driver's verification page; it's stored in the qr-codes
+        // bucket (public read, coordinator-only write) for printing and laminating.
+        qrImage = await QRCode.toDataURL(driverQrUrl(APP_URL, qrCode), QR_OPTIONS)
         const blob = await (await fetch(qrImage)).blob()
-        const { error } = await supabase.storage.from("qr-codes").upload(`${qrCode}.png`, blob, { contentType: "image/png", upsert: true })
-        qrStored = error ? null : supabase.storage.from("qr-codes").getPublicUrl(`${qrCode}.png`).data.publicUrl
+        const file = driverQrFile(qrCode)
+        const { error } = await supabase.storage.from("qr-codes").upload(file, blob, { contentType: "image/png", upsert: true })
+        qrStored = error ? null : supabase.storage.from("qr-codes").getPublicUrl(file).data.publicUrl
       }
       setDone({ role, id: created.id, name: base.name, qrCode: role === "driver" ? qrCode : null, qrImage, qrStored })
       setForm(EMPTY)

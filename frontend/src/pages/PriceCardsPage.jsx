@@ -3,6 +3,8 @@ import QRCode from "qrcode"
 import { Check } from "lucide-react"
 import { ErrorNote, Field, Screen, SecondaryButton } from "../components/ui"
 import { api } from "../lib/api"
+import { APP_URL } from "../lib/appUrl"
+import { QR_OPTIONS } from "../lib/driverQr"
 import { ksh } from "../lib/format"
 import { supabase } from "../lib/supabase"
 
@@ -54,8 +56,8 @@ export default function PriceCardsPage() {
           driver_qr: driverQr || null,
         },
       })
-      const url = `${window.location.origin}${window.location.pathname}#${result.path}`
-      const qr = await QRCode.toDataURL(url, { width: 480, margin: 2, color: { dark: "#1A1A1A", light: "#FFFFFF" } })
+      const url = `${APP_URL}/#${result.path}`
+      const qr = await QRCode.toDataURL(url, QR_OPTIONS)
       setCard({ url, qr, total: result.total_amount })
     } catch (err) {
       setError(err.message)

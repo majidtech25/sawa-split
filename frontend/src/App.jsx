@@ -3,6 +3,7 @@ import { HashRouter, Link, Navigate, NavLink, Route, Routes, useLocation, useNav
 import Home from "./pages/Home"
 import LoginPage from "./pages/LoginPage"
 import { CheckoutPage, PriceCardPage } from "./pages/PayPage"
+import DriverPage from "./pages/DriverPage"
 import DashboardPage from "./pages/DashboardPage"
 import ReceiptPage from "./pages/ReceiptPage"
 import CoordinatorPage from "./pages/CoordinatorPage"
@@ -135,6 +136,7 @@ export default function App() {
         <Route path="/" element={<><AppHeader width="page" /><Home /></>} />
         <Route path="/pay/:producerId" element={<TouristScreen><PriceCardPage /></TouristScreen>} />
         <Route path="/pay/:producerId/checkout" element={<TouristScreen><CheckoutPage /></TouristScreen>} />
+        <Route path="/driver/:code" element={<TouristScreen><DriverPage /></TouristScreen>} />
         <Route path="/receipt/:transactionId" element={<TouristScreen><ReceiptPage /></TouristScreen>} />
         <Route path="/login" element={<TouristScreen><LoginPage /></TouristScreen>} />
         <Route path="/dashboard" element={<MemberScreen><DashboardPage /></MemberScreen>} />
