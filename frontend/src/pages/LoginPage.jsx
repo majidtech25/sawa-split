@@ -64,7 +64,7 @@ export default function LoginPage() {
         <ErrorNote>{error}</ErrorNote>
       </form>
       <p className="mt-8 text-center text-[13px] text-sawa-text-muted">
-        Accounts are created by your coordinator. There's no sign-up here.
+        Makers and drivers are registered by your site coordinator. Ask them for your login.
       </p>
     </Screen>
   )

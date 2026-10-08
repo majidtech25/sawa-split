@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { AlertTriangle, Check } from "lucide-react"
 import { ErrorNote, LiveIndicator, StatusBadge } from "../components/ui"
 import { api } from "../lib/api"
-import { eatDateTime, ksh } from "../lib/format"
+import { eatDateTime, ksh, wasCredited } from "../lib/format"
 import { useLiveChanges } from "../lib/realtime"
 
 function Tile({ label, value, note, tone = "text-sawa-text" }) {
@@ -112,7 +112,7 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
 
           <section className="mt-8">
             <h2 className="text-lg font-semibold">Transactions</h2>
-            <div className="mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
+            <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
               <table className="w-full min-w-[760px] border-collapse">
                 <thead>
                   <tr>
@@ -143,8 +143,14 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
                         <StatusBadge status={row.status} />
                       </Td>
                       <Td right mono>{ksh(row.total_amount)}</Td>
-                      <Td right mono className="text-sawa-green">{ksh(row.maker_amount)}</Td>
-                      <Td right mono>{ksh(row.driver_amount)}</Td>
+                      {wasCredited(row.status) ? (
+                        <>
+                          <Td right mono className="text-sawa-green">{ksh(row.maker_amount)}</Td>
+                          <Td right mono>{ksh(row.driver_amount)}</Td>
+                        </>
+                      ) : (
+                        <Td right colSpan={2} className="whitespace-nowrap text-sawa-text-muted">Not credited</Td>
+                      )}
                       {renderTransactionAction && <Td right>{renderTransactionAction(row, reload)}</Td>}
                     </tr>
                   ))}
@@ -155,7 +161,7 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
 
           <section className="mt-8">
             <h2 className="text-lg font-semibold">Payouts</h2>
-            <div className="mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
+            <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
               <table className="w-full min-w-[640px] border-collapse">
                 <thead>
                   <tr>

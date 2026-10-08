@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Check, Wallet } from "lucide-react"
 import { ErrorNote, LiveIndicator, Screen, SecondaryButton, StatusBadge } from "../components/ui"
 import { api } from "../lib/api"
-import { eatDateTime, ksh } from "../lib/format"
+import { eatDateTime, ksh, wasCredited } from "../lib/format"
 import { useLiveChanges } from "../lib/realtime"
 import { currentProfile, supabase } from "../lib/supabase"
 
@@ -191,7 +191,11 @@ export default function DashboardPage() {
                   <StatusBadge status={row.status} />
                 </div>
                 <div className="text-right">
-                  <div className="font-mono text-[15px] font-semibold tabular-nums">{ksh(shareOf(row))}</div>
+                  {wasCredited(row.status) ? (
+                    <div className="font-mono text-[15px] font-semibold tabular-nums">{ksh(shareOf(row))}</div>
+                  ) : (
+                    <div className="text-[15px] text-sawa-text-muted">Not credited</div>
+                  )}
                   <div className="text-xs text-sawa-text-muted">of {ksh(row.total_amount)}</div>
                 </div>
               </div>

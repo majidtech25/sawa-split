@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { HashRouter, Link, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
+import { HashRouter, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import Home from "./pages/Home"
 import LoginPage from "./pages/LoginPage"
 import { CheckoutPage, PriceCardPage } from "./pages/PayPage"
@@ -13,24 +13,56 @@ import { currentProfile, endSession, supabase } from "./lib/supabase"
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
 
-function AppHeader({ wide = false, nav = null, signedIn = false }) {
+const HEADER_WIDTHS = {
+  card: "max-w-[420px] px-4",
+  wide: "max-w-[420px] px-4 md:max-w-6xl md:px-8",
+  page: "max-w-6xl px-6", // the homepage's own full-width layout
+}
+
+const ROLE_HOME = {
+  coordinator: { to: "/coordinator", label: "Reconciliation" },
+  producer: { to: "/dashboard", label: "Dashboard" },
+  driver: { to: "/dashboard", label: "Dashboard" },
+}
+
+const navLink = ({ isActive }) =>
+  `whitespace-nowrap ${focusRing} ${isActive ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"}`
+
+// Signed in: the role's home link (or the coordinator's nav) and "Log out". Signed
+// out: "Log in". There's no sign-up link: accounts are created by a coordinator.
+function AppHeader({ width = "card", nav = null }) {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const profile = currentProfile()
+  const home = profile && ROLE_HOME[profile.role]
   async function logOut() {
     await endSession()
     navigate("/login", { replace: true })
   }
   return (
     <header className="border-b border-sawa-border bg-sawa-surface">
-      <div className={`mx-auto flex items-center justify-between gap-4 px-4 py-3 ${wide ? "max-w-[420px] md:max-w-6xl md:px-8" : "max-w-[420px]"}`}>
-        <Link to="/" className={`text-base font-bold tracking-tight ${focusRing}`}>
+      {/* On phones a nav drops to its own row so the brand and "Log out" never wrap. */}
+      <div className={`mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 py-3 ${HEADER_WIDTHS[width]}`}>
+        <Link to="/" className={`whitespace-nowrap text-base font-bold tracking-tight ${focusRing}`}>
           Sawa <span className="text-sawa-green">Split</span>
         </Link>
-        <div className="flex items-center gap-4 text-sm">
-          {nav}
-          {signedIn && (
-            <button type="button" onClick={logOut} className={`text-sawa-text-muted hover:text-sawa-text ${focusRing}`}>
+        {nav && <div className="order-last w-full text-sm md:order-none md:ml-auto md:w-auto">{nav}</div>}
+        <div className={`ml-auto flex items-center gap-4 text-sm ${nav ? "md:ml-0" : ""}`}>
+          {home && !nav && (
+            <NavLink to={home.to} end className={navLink}>
+              {home.label}
+            </NavLink>
+          )}
+          {profile ? (
+            <button type="button" onClick={logOut} className={`whitespace-nowrap text-sawa-text-muted hover:text-sawa-text ${focusRing}`}>
               Log out
             </button>
+          ) : (
+            pathname !== "/login" && (
+              <Link to="/login" className={`whitespace-nowrap text-sawa-green hover:underline ${focusRing}`}>
+                Log in
+              </Link>
+            )
           )}
         </div>
       </div>
@@ -39,16 +71,15 @@ function AppHeader({ wide = false, nav = null, signedIn = false }) {
 }
 
 function CoordinatorNav() {
-  const link = ({ isActive }) => `${focusRing} ${isActive ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"}`
   return (
     <nav aria-label="Coordinator" className="flex flex-wrap gap-x-4 gap-y-1">
-      <NavLink to="/coordinator" end className={link}>
+      <NavLink to="/coordinator" end className={navLink}>
         Reconciliation
       </NavLink>
-      <NavLink to="/coordinator/register" className={link}>
+      <NavLink to="/coordinator/register" className={navLink}>
         Register
       </NavLink>
-      <NavLink to="/coordinator/price-cards" className={link}>
+      <NavLink to="/coordinator/price-cards" className={navLink}>
         Price cards
       </NavLink>
     </nav>
@@ -81,7 +112,7 @@ function TouristScreen({ children }) {
 function CoordinatorScreen({ children }) {
   return (
     <RequireRole roles={["coordinator"]}>
-      <AppHeader wide signedIn nav={<CoordinatorNav />} />
+      <AppHeader width="wide" nav={<CoordinatorNav />} />
       {children}
     </RequireRole>
   )
@@ -90,7 +121,7 @@ function CoordinatorScreen({ children }) {
 function MemberScreen({ children }) {
   return (
     <RequireRole roles={["producer", "driver"]}>
-      <AppHeader signedIn />
+      <AppHeader />
       {children}
     </RequireRole>
   )
@@ -101,7 +132,7 @@ export default function App() {
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<><AppHeader width="page" /><Home /></>} />
         <Route path="/pay/:producerId" element={<TouristScreen><PriceCardPage /></TouristScreen>} />
         <Route path="/pay/:producerId/checkout" element={<TouristScreen><CheckoutPage /></TouristScreen>} />
         <Route path="/receipt/:transactionId" element={<TouristScreen><ReceiptPage /></TouristScreen>} />

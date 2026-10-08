@@ -23,3 +23,8 @@ const dateFormat = new Intl.DateTimeFormat("en-KE", {
 export const eatTime = (iso) => timeFormat.format(new Date(iso))
 export const eatDate = (iso) => dateFormat.format(new Date(iso))
 export const eatDateTime = (iso) => `${eatDate(iso)}, ${eatTime(iso)}`
+
+// A failed STK Push or an expired cash sale never wrote ledger entries (rules 6, 12),
+// so its stored split was never credited to anyone and isn't shown as if it were.
+const NEVER_CREDITED = new Set(["failed", "cash_expired"])
+export const wasCredited = (status) => !NEVER_CREDITED.has(status)
