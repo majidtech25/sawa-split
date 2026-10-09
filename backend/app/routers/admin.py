@@ -16,18 +16,16 @@ from ..security import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-# Statuses where money has actually reached the Till / changed hands.
-COLLECTED_STATUSES = ("confirmed", "cash_confirmed", "disputed")
-
-
 class Totals(BaseModel):
-    collected: Decimal          # every shilling received: confirmed M-Pesa + confirmed cash (disputed included)
+    collected: Decimal          # M-Pesa money received (confirmed + disputed); cash never reaches the account
     disbursed: Decimal          # paid out by B2C
-    pending: Decimal            # still owed to makers and drivers (pending + available + frozen)
+    pending: Decimal            # M-Pesa money still owed to makers and drivers (pending + available + frozen)
     frozen: Decimal             # the part of `pending` held by disputes
     ledger_paid: Decimal        # ledger entries marked paid
     balanced: bool              # collected == ledger_paid + pending, and ledger_paid == disbursed
     needs_attention: int        # expired cash sales + payouts waiting for a coordinator retry
+    cash_recorded: Decimal      # confirmed cash sales (disputed included): held by makers, never paid out by B2C
+    debts_outstanding: Decimal  # drivers' shares of cash sales that makers still owe
 
 
 class TransactionRow(BaseModel):
@@ -55,8 +53,18 @@ class WithdrawalRow(BaseModel):
     awaiting_coordinator: bool
 
 
+class DebtRow(BaseModel):
+    id: str
+    created_at: str
+    producer_name: str
+    driver_name: str
+    amount: Decimal
+    disputed: bool
+
+
 class ReconciliationResponse(BaseModel):
     totals: Totals
+    debts: list[DebtRow]
     transactions: list[TransactionRow]
     withdrawals: list[WithdrawalRow]
 
@@ -66,15 +74,20 @@ async def reconciliation(
     _admin: Annotated[dict[str, Any], Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ReconciliationResponse:
-    """Till collected vs. disbursed vs. still owed. There is no platform fee (rule 4),
-    so every collected shilling is either already paid out or still owed — `balanced`
-    checks exactly that, cash included."""
+    """M-Pesa collected vs. disbursed vs. still owed. There is no platform fee (rule 4),
+    so every M-Pesa shilling is either already paid out or still owed, and `balanced`
+    checks exactly that. Cash is reported beside it, not in it: it never reaches the
+    M-Pesa account, so these totals match the account's real balance (rule 12)."""
     t = (
         await session.execute(
             text(
                 """
                 select
-                  (select coalesce(sum(total_amount), 0) from transactions where status = any(:collected)) as collected,
+                  (select coalesce(sum(total_amount), 0) from transactions
+                     where payment_method = 'mpesa' and status in ('confirmed', 'disputed')) as collected,
+                  (select coalesce(sum(total_amount), 0) from transactions
+                     where payment_method = 'cash' and status in ('cash_confirmed', 'disputed')) as cash_recorded,
+                  (select coalesce(sum(amount), 0) from cash_debts where status = 'outstanding') as debts_outstanding,
                   (select coalesce(sum(amount), 0) from withdrawal_requests where status = 'paid') as disbursed,
                   (select coalesce(sum(amount), 0) from wallet_ledger_entries where status in ('pending', 'available', 'frozen')) as pending,
                   (select coalesce(sum(amount), 0) from wallet_ledger_entries where status = 'frozen') as frozen,
@@ -82,8 +95,7 @@ async def reconciliation(
                   (select count(*) from transactions where status = 'cash_expired')
                     + (select count(*) from withdrawal_requests where status = 'failed') as needs_attention
                 """
-            ),
-            {"collected": list(COLLECTED_STATUSES)},
+            )
         )
     ).one()
     totals = Totals(
@@ -94,7 +106,26 @@ async def reconciliation(
         ledger_paid=t.ledger_paid,
         balanced=t.collected == t.ledger_paid + t.pending and t.ledger_paid == t.disbursed,
         needs_attention=t.needs_attention,
+        cash_recorded=t.cash_recorded,
+        debts_outstanding=t.debts_outstanding,
     )
+
+    debts = (
+        await session.execute(
+            text(
+                """
+                select d.id, d.created_at, d.amount, p.name as producer_name, dr.name as driver_name,
+                       t.status = 'disputed' as disputed
+                from cash_debts d
+                join producers p on p.id = d.producer_id
+                join drivers dr on dr.id = d.driver_id
+                join transactions t on t.id = d.transaction_id
+                where d.status = 'outstanding'
+                order by d.created_at
+                """
+            )
+        )
+    ).all()
 
     txns = (
         await session.execute(
@@ -130,6 +161,13 @@ async def reconciliation(
 
     return ReconciliationResponse(
         totals=totals,
+        debts=[
+            DebtRow(
+                id=str(d.id), created_at=d.created_at.isoformat(), producer_name=d.producer_name,
+                driver_name=d.driver_name, amount=d.amount, disputed=d.disputed,
+            )
+            for d in debts
+        ],
         transactions=[
             TransactionRow(
                 id=str(r.id), created_at=r.created_at.isoformat(), producer_name=r.producer_name,

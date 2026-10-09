@@ -12,7 +12,7 @@
 
 **Visual style we're aiming for:** minimal, fintech-restrained — quiet confidence, not startup energy. Two accent colors with single jobs (green for confirmed/success, ochre for the one "Pay" button, terracotta for errors only), one type family for words (Inter) and one for numbers (IBM Plex Mono, tabular), one 8px radius everywhere, one 8px spacing grid. No gradients, no stock tourist photography, no icon without a text label, nothing that reads as generated-in-five-minutes. Full spec in section 7 and the published Design Reference artifact.
 
-**The core it needs to prove, end to end, by the demo:** a real tourist payment splits automatically and correctly between maker and driver (with photo consent as its own component), the ledger updates live, and at least one withdrawal actually pays out — on real (sandbox) Daraja, not mocked. Cash payments prove the same split via dual confirmation instead of Daraja (see section 4 rule 12).
+**The core it needs to prove, end to end, by the demo:** a real tourist payment splits automatically and correctly between maker and driver (with photo consent as its own component), the ledger updates live, and at least one withdrawal actually pays out — on real (sandbox) Daraja, not mocked. Cash payments prove the same split via dual confirmation instead of Daraja, as a record: the cash stays with the maker and is never paid out again by B2C (see section 4 rule 12).
 
 This is an MVP for the Future Leaders Challenge Eastern Africa, built for a live demo, not a production system yet.
 
@@ -54,7 +54,7 @@ You are the engineer implementing this MVP. Treat section 4 (business rules) and
 - **The B2C recipient must be 254708374149**, Safaricom's sandbox test MSISDN. Any other number fails with ResultCode **2040** ("Credit Party customer type … can't be supported"). That's why the stage-3 test producer's phone is 254708374149: a withdrawal pays the recipient's own phone.
 - **ResultCode 8006 means the initiator's security credential is locked.** Fix it by regenerating the credential in the Daraja portal's Test Credentials panel and pasting it into `DARAJA_SECURITY_CREDENTIAL`. Don't retry in a loop: every failed attempt against a locked initiator can extend the lock.
 - **In `.env`, keep comments on their own line.** A value like `DARAJA_B2C_SHORTCODE=600979# comment` loads as the whole string, comment included, and goes out as `PartyA`. This regressed twice.
-- **Running `backend/scripts/verify_stage5.sh`:** pipe it through `tee` only with `set -o pipefail`, otherwise tee's exit status hides failures. Its Test 3 withdraws the producer's full balance, which must reach KES 500 after the run's KES 45 STK credit, so the producer needs at least KES 455 available first. The old KES 600 fixture entry behind that was Stage 5 debug data and was deleted on 2026-10-07 (it made reconciliation unbalanced). Fund the balance with a confirmed cash sale instead, the way `verify_stage6.sh` does.
+- **Running `backend/scripts/verify_stage5.sh`:** pipe it through `tee` only with `set -o pipefail`, otherwise tee's exit status hides failures. Its Test 3 withdraws the producer's full balance, which must reach KES 500 after the run's KES 45 STK credit, so the producer needs at least KES 455 available first. The old KES 600 fixture entry behind that was Stage 5 debug data and was deleted on 2026-10-07 (it made reconciliation unbalanced). Fund the balance with a simulated M-Pesa sale instead (`scripts/simulate_mpesa_sale.py` plus a simulated callback to the local server), the way `verify_stage6.sh` does. A cash sale can't fund it any more, because cash is never payable (rule 12).
 - **A sandbox STK Push to a real phone number charges real money.** Confirmed: KES 60 was deducted and is not refundable. Safaricom's test MSISDN no longer reliably auto-completes STK, so a real number is the only reliable way to get a callback, and each attempt costs the full amount. The script's STK payer comes from `STK_PAYER_MSISDN` (`.env` only, never committed). Keep the test amount at the KES 50 + 10 minimum.
 - **B2C in sandbox only pays the test number**, so a sandbox payout never reaches a real producer's or driver's phone.
 
@@ -109,17 +109,33 @@ confirmation_deadline timestamptz,          -- cash only: created_at + CASH_CONF
 created_at            timestamptz not null default now(),
 constraint transactions_at_least_one_component check (product_enabled or photo_enabled)
 
--- wallet_ledger_entries   (append-only — balances are computed, never stored directly)
--- Written identically for mpesa and cash transactions, once each has reached its own
--- "money has actually moved" point: the STK callback for mpesa, cash_confirmed for cash.
+-- wallet_ledger_entries   (append-only — balances are computed, never stored directly; amounts never change)
+-- Only M-Pesa money is ever payable (rule 12). An M-Pesa sale writes the maker's and driver's
+-- shares at its STK callback. A cash sale, at cash_confirmed, writes only the maker's share,
+-- as 'cash_held' (already in hand, never payable); the driver's share becomes a cash_debts row.
+-- Settling a debt marks whole maker entries 'transferred' and writes new entries: the driver's
+-- credit and the maker's change. So pending + available + frozen + paid = M-Pesa collected.
 id              uuid primary key default gen_random_uuid(),
 recipient_type  text not null check (recipient_type in ('maker','driver')),
 recipient_id    uuid not null,
 amount          numeric not null check (amount > 0),
-status          text not null check (status in ('pending','available','paid','frozen')),
+status          text not null check (status in ('pending','available','paid','frozen','cash_held','transferred')),
 transaction_id  uuid references transactions(id),
+settlement_id   uuid references cash_debts(id),  -- set on entries a debt settlement spent or created
 created_at      timestamptz not null default now()
 -- index: (recipient_type, recipient_id, status) for fast balance queries
+
+-- cash_debts   (maker -> driver: the driver's share of a confirmed cash sale, which the maker holds)
+-- Settled internally, never by B2C: from the maker's available M-Pesa-sourced entries, in full,
+-- at confirmation if they cover it, otherwise as soon as they do (STK credit, payout, or sweep).
+id              uuid primary key default gen_random_uuid(),
+transaction_id  uuid unique not null references transactions(id),
+producer_id     uuid not null references producers(id),   -- owes
+driver_id       uuid not null references drivers(id),     -- is owed
+amount          numeric not null check (amount > 0),      -- the sale's driver_amount
+status          text not null default 'outstanding' check (status in ('outstanding','settled')),
+created_at      timestamptz not null default now(),
+settled_at      timestamptz                               -- set exactly when status = 'settled'
 
 -- withdrawal_requests
 id                uuid primary key default gen_random_uuid(),
@@ -155,13 +171,19 @@ Storage: one Supabase Storage bucket, `qr-codes` — public read, coordinator-on
 7. **Idempotent webhooks:** a redelivered Daraja callback (STK or B2C) is a no-op, never a double credit/payout.
 8. **Unregistered driver QR or inactive producer:** rejected at scan time, before payment initiation.
 9. **Withdrawals are always full-balance, never partial.** Threshold KES 500.
-10. **Daily batch sweep at 18:00 EAT** auto-withdraws anyone ≥ KES 500 who hasn't already withdrawn that day.
+10. **Daily batch sweep at 18:00 EAT** first settles every maker → driver cash debt that M-Pesa earnings now cover (rule 12), then auto-withdraws anyone whose *payable* balance is ≥ KES 500 and who hasn't already withdrawn that day. Payable means M-Pesa-sourced only: a driver's available balance; a maker's available balance minus any debt still owed to drivers. Withdrawals (rule 9) use the same payable balance. **B2C must never pay out more than M-Pesa collected:** before every B2C call the API checks that everything paid or being paid, plus this payout, fits within M-Pesa collected, and that the payout fits within the recipient's own available entries. If not, it refuses and logs a critical error (`PayoutCapExceeded`) instead of paying. *(Revised 2026-10-09; it used to sweep the whole available balance, cash-sourced included.)*
 11. **Payout failure:** funds return to `available`, one automatic retry, then requires manual coordinator retry.
 12. **Cash is a first-class second payment method, tracked via dual confirmation — not an offline afterthought and not evidence-only.** Split into two enforcement cases by whether a driver is attached, because the enforcement mechanism differs:
     - **Case A — referred cash sale** (`driver_id` set): requires BOTH `driver_confirmed_at` and `maker_confirmed_at` to be set before the transaction moves from `cash_unconfirmed` to `cash_confirmed`.
     - **Case B — walk-up cash sale** (no `driver_id`): requires BOTH `tourist_confirmed_at` and `maker_confirmed_at`.
     - A `cash_unconfirmed` transaction still unconfirmed past `confirmation_deadline` (default 10 min, `CASH_CONFIRM_WINDOW_MINUTES`) flips to `cash_expired` — kept visible in the ledger and reconciliation view, never deleted, never silently retried.
-    - **Only `cash_confirmed` transactions write `wallet_ledger_entries` and enter the withdrawal pipeline.** A `cash_expired` transaction never does.
+    - **Only `cash_confirmed` transactions write `wallet_ledger_entries`.** A `cash_expired` transaction never does.
+    - **Cash money is never paid out by B2C** *(revised 2026-10-09).* The tourist hands cash to the maker, so it never reaches the M-Pesa account. Paying it out again would pay the maker twice, and a faked cash sale would be paid out of other tourists' M-Pesa money. So, at `cash_confirmed`:
+      - The maker's share is recorded as received (`cash_held` ledger entry). It never enters the maker's payable balance.
+      - The driver's share (Case A) becomes a debt the maker owes the driver (`cash_debts`). It's settled internally, with no B2C call, by moving that amount from the maker's available M-Pesa-sourced balance to the driver's. This happens at confirmation if the maker has enough, otherwise as soon as they do (their next M-Pesa credit, a payout attempt, or the sweep). Debts settle whole, never partially. From then on the driver is paid by the normal rules (9–11).
+      - A disputed cash sale's debt neither settles nor counts against the maker until the dispute is cleared (rule 13).
+    - Consequence: a fake Case A sale (driver and maker colluding) nets the pair zero, since the driver gains exactly what the maker loses. A fake Case B sale moves no money at all.
+    - **Known records gap (Phase 2):** Case B's tourist confirm token is returned to whoever calls `POST /transactions/initiate`, so a maker can create a walk-up cash sale on their own phone and confirm it as both tourist and maker. Since the fix above, that can't move any money; it can only put a sale that never happened into the records (cash recorded, a photo-consent record). It's a records problem, not a money one: Phase 2 should deliver the token only to the tourist's own device or SMS.
     - Full design rationale: `CASH_TRACKING_UPDATE.md`. Do not simplify this back to a single self-reported "log cash sale" form — that was an earlier, explicitly rejected design.
 13. **Disputes:** a coordinator can freeze a transaction's ledger entries (`frozen` status), excluded from any withdrawal/batch calculation until resolved.
 14. **No partial withdrawals, no automatic dispute resolution, no public self-registration, no multi-currency/KYC/tax handling** — all explicitly out of scope.
@@ -190,11 +212,11 @@ RLS permission matrix:
 
 1. `POST /transactions/initiate` — for `payment_method: mpesa`, STK Push fires. For `payment_method: cash`, no Daraja call — the transaction is created directly in `cash_unconfirmed` status with `confirmation_deadline` set (`created_at + CASH_CONFIRM_WINDOW_MINUTES`).
 2. **M-Pesa path:** `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` ledger entries for the maker (product_maker_amount + photo_amount, whichever enabled) and, only if `product_enabled`, for the driver.
-2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` — called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B). Sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed` and the same `pending` ledger entries are written as in step 2 — from here, cash-derived entries flow through steps 3–6 identically to M-Pesa ones. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and no ledger entries are ever written for that transaction.
-3. Balance becomes `available` once cleared for payout eligibility.
-4. `POST /withdrawals/request` (on-demand, full balance, ≥ KES 500) or the 18:00 EAT batch sweep triggers Daraja B2C, with a generated idempotency key.
+2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` is called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B), and sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed`. Then the maker's share is written as a `cash_held` ledger entry (never payable), and the driver's share, if any, opens a `cash_debts` row that settles from the maker's M-Pesa-sourced balance as described in rule 12. Cash never reaches steps 4–5 itself; only a driver's settled share does, and that is M-Pesa money moved from the maker. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and nothing is written for that transaction.
+3. Balance becomes `available` once cleared for payout eligibility. After every STK credit, the maker's outstanding cash debts are settled if the new balance covers them.
+4. `POST /withdrawals/request` (on-demand, full payable balance, ≥ KES 500) or the 18:00 EAT batch sweep (rule 10: settles debts first) triggers Daraja B2C, with a generated idempotency key, after the never-more-than-M-Pesa-collected check.
 5. `POST /daraja/b2c-callback` — marks the ledger entry `paid`, or on failure returns funds to `available` (one automatic retry, then manual coordinator retry).
-6. `GET /admin/reconciliation` — Till collected vs. disbursed vs. pending, should always sum correctly, including confirmed-cash entries.
+6. `GET /admin/reconciliation` — M-Pesa collected vs. disbursed vs. still owed, which always sums exactly and matches the real M-Pesa account balance. Cash recorded and outstanding maker → driver debts are shown separately, beside these totals, never in them.
 
 ## 7. Frontend — design tokens and screens
 
@@ -238,7 +260,7 @@ Don't generate the whole app in one pass. Each stage should end in something tha
 3. **Auth.** Coordinator-created accounts via Supabase Auth's admin API (phone + PIN), login endpoint, RLS policies matching the permission matrix in section 5. Checkpoint: you can log in as a test producer and a test coordinator and get different access.
 4. **Core backend endpoints (no Daraja yet).** `/transactions/initiate` and the ledger-writing logic, using a manually-triggered "fake confirm" instead of a real Daraja callback for now. Also build the cash dual-confirmation path here (rule 12, `POST /transactions/:id/confirm`) — it shares the same ledger-writing logic once a transaction reaches its confirmed state, so it's a small parallel branch, not a separate subsystem. Checkpoint: a fake M-Pesa transaction and a cash transaction (both Case A and Case B) each correctly write ledger entries split per section 4's rules.
 5. **Daraja integration.** Real STK Push, real callback handling, idempotency check, then B2C payout + its callback. Checkpoint: one real sandbox transaction goes all the way from STK Push to a ledger entry moving from `pending` to `available`.
-6. **Batch sweep.** APScheduler job for the 18:00 EAT sweep, on-demand withdrawal endpoint. Checkpoint: a withdrawal actually triggers B2C and the ledger entry reaches `paid` — for both an M-Pesa-sourced and a cash-sourced ledger entry.
+6. **Batch sweep.** APScheduler job for the 18:00 EAT sweep, on-demand withdrawal endpoint. Checkpoint: a withdrawal actually triggers B2C and the ledger entry reaches `paid`. *(Revised 2026-10-09: originally "for both an M-Pesa-sourced and a cash-sourced ledger entry". Cash is no longer paid out by B2C at all (rule 12), so only M-Pesa-sourced entries, including a driver's share moved from a maker by debt settlement, ever reach `paid`.)*
 7. **Frontend screens, wired.** Build against the wireframes/design tokens in section 7, screen by screen, each one talking to the real backend as soon as it exists — price card and payment entry first (they depend on stage 4-5, including the Cash option), then confirmation, then producer/driver dashboard (with the confirm action), then coordinator login/registration/reconciliation last.
 8. **Reconciliation + disputes.** The coordinator view (collected/disbursed/pending tiles + table, with the three cash states visible) and the dispute-flag action that freezes ledger entries.
 9. **End-to-end rehearsal.** Run the exact sequence in `DEMO_SCRIPT.md` for real, on the actual deployed Render URLs, not localhost — this is also when the backup screen recording gets made (see `DEMO_SCRIPT.md` section 5).

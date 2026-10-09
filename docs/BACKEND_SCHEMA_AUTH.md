@@ -2,7 +2,7 @@
 
 **Status:** Locked. Full rules and lifecycle states are in the published Rulebook artifact; this file is the schema + auth sequence Claude Code builds directly from.
 
-## 1. Schema — six tables
+## 1. Schema — six tables, plus `cash_debts` (2026-10-09)
 
 ```sql
 -- producers
@@ -53,17 +53,34 @@ confirmation_deadline timestamptz,          -- cash only: created_at + CASH_CONF
 created_at            timestamptz not null default now(),
 constraint transactions_at_least_one_component check (product_enabled or photo_enabled)
 
--- wallet_ledger_entries   (append-only — balances are computed, never stored directly)
--- Written identically for mpesa and cash transactions, once each has reached its own
--- "money has actually moved" point: the STK callback for mpesa, cash_confirmed for cash.
+-- wallet_ledger_entries   (append-only — balances are computed, never stored directly; amounts never change)
+-- Only M-Pesa money is ever payable (CLAUDE.md rule 12). An M-Pesa sale writes the maker's and
+-- driver's shares at its STK callback. A cash sale, at cash_confirmed, writes only the maker's
+-- share, as 'cash_held' (already in hand, never payable); the driver's share becomes a
+-- cash_debts row. Settling a debt marks whole maker entries 'transferred' and writes new
+-- entries: the driver's credit and the maker's change. So pending + available + frozen + paid
+-- always equals M-Pesa collected.
 id              uuid primary key default gen_random_uuid(),
 recipient_type  text not null check (recipient_type in ('maker','driver')),
 recipient_id    uuid not null,
 amount          numeric not null check (amount > 0),
-status          text not null check (status in ('pending','available','paid','frozen')),
+status          text not null check (status in ('pending','available','paid','frozen','cash_held','transferred')),
 transaction_id  uuid references transactions(id),
+settlement_id   uuid references cash_debts(id),  -- set on entries a debt settlement spent or created
 created_at      timestamptz not null default now()
 -- index: (recipient_type, recipient_id, status) for fast balance queries
+
+-- cash_debts   (migration 0010: maker -> driver, the driver's share of a confirmed cash sale)
+-- Settled internally, never by B2C: from the maker's available M-Pesa-sourced entries, in full,
+-- at confirmation if they cover it, otherwise as soon as they do (STK credit, payout, or sweep).
+id              uuid primary key default gen_random_uuid(),
+transaction_id  uuid unique not null references transactions(id),
+producer_id     uuid not null references producers(id),   -- owes
+driver_id       uuid not null references drivers(id),     -- is owed
+amount          numeric not null check (amount > 0),      -- the sale's driver_amount
+status          text not null default 'outstanding' check (status in ('outstanding','settled')),
+created_at      timestamptz not null default now(),
+settled_at      timestamptz                               -- set exactly when status = 'settled'
 
 -- withdrawal_requests
 id                uuid primary key default gen_random_uuid(),
@@ -95,7 +112,7 @@ One Supabase Storage bucket, `qr-codes` — public read, coordinator-only write.
 | Role | producers/drivers | transactions | wallet_ledger_entries | withdrawal_requests | admin actions |
 |---|---|---|---|---|---|
 | Tourist (anonymous) | — | create (via pay endpoint only) + confirm own cash txn (token-scoped) | — | — | — |
-| Producer/Driver | read own | read own + confirm own cash txn | read own | create/read own | — |
+| Producer/Driver | read own | read own + confirm own cash txn | read own (and own `cash_debts`, owed or owed to) | create/read own | — |
 | Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration |
 
 Enforced twice: Supabase RLS at the data layer, FastAPI endpoint checks at the API layer. A client can display its own balance; it can never write to it directly — only the FastAPI service, using the service-role key, writes to money-affecting tables.
@@ -117,8 +134,8 @@ No public self-registration for any role. Accounts are created by the coordinato
 
 1. `POST /transactions/initiate` — for `payment_method: mpesa`, STK Push fires. For `payment_method: cash`, no Daraja call — the transaction is created directly in `cash_unconfirmed` status with `confirmation_deadline` set (`created_at + CASH_CONFIRM_WINDOW_MINUTES`).
 2. **M-Pesa path:** `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` `wallet_ledger_entries` for maker (product_maker_amount + photo_amount, whichever are enabled) and, only if `product_enabled`, for the driver.
-2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` — called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B). Sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed` and the same `pending` ledger entries are written as in step 2 — from here, cash-derived entries flow through steps 3–6 identically to M-Pesa ones. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and no ledger entries are ever written for that transaction.
-3. Balance becomes `available` once cleared for payout eligibility.
-4. `POST /withdrawals/request` (on-demand, full balance, ≥ KES 500) **or** the 18:00 EAT APScheduler batch sweep — either path creates a `withdrawal_requests` row with a generated idempotency key and triggers Daraja B2C.
+2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` is called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B), and sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed`. Then the maker's share is written as `cash_held` (never payable), and the driver's share, if any, opens a `cash_debts` row. That debt is settled from the maker's available M-Pesa-sourced entries at once if they cover it, otherwise as soon as they do. Cash itself never reaches steps 4–5. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and nothing is written for that transaction.
+3. Balance becomes `available` once cleared for payout eligibility. After every STK credit, the maker's outstanding cash debts are settled if the new balance covers them.
+4. `POST /withdrawals/request` (on-demand, full payable balance, ≥ KES 500) **or** the 18:00 EAT APScheduler batch sweep (which settles cash debts first). Either path creates a `withdrawal_requests` row with a generated idempotency key and triggers Daraja B2C. Payable is the available M-Pesa-sourced balance, minus (for a maker) debts still owed to drivers. Before every B2C call, the API refuses with a critical log (`PayoutCapExceeded`) if everything paid or being paid, plus this payout, would exceed M-Pesa collected, or if this payout exceeds the recipient's own available entries.
 5. `POST /daraja/b2c-callback` — marks the ledger entry `paid`, or on failure, returns funds to `available` (one automatic retry, then requires coordinator manual retry).
-6. `GET /admin/reconciliation` — Till collected vs. disbursed vs. pending, should always sum correctly, including confirmed-cash entries.
+6. `GET /admin/reconciliation` — M-Pesa collected vs. disbursed vs. still owed. These always sum exactly and match the real M-Pesa account balance. Cash recorded and outstanding maker → driver debts are reported separately.

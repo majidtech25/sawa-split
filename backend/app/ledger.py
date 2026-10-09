@@ -47,9 +47,9 @@ async def write_ledger_entries(
     maker_amount: Decimal,
     driver_amount: Decimal,
 ) -> None:
-    """Shared by the mpesa fake-confirm and cash dual-confirm paths once a transaction
-    reaches its confirmed state (CLAUDE.md section 6) — same split, same pending entries,
-    regardless of payment method."""
+    """An M-Pesa sale's split, written once its STK callback confirms it (CLAUDE.md
+    section 6). Cash sales go through record_cash_sale below instead: their money is
+    never in the M-Pesa account, so it must never become payable."""
     await session.execute(
         text(
             """
@@ -83,3 +83,167 @@ async def write_ledger_entries(
         text("update wallet_ledger_entries set status = 'available' where transaction_id = :txn_id and status = 'pending'"),
         {"txn_id": transaction_id},
     )
+
+
+# --- Cash sales and maker -> driver debts (CLAUDE.md rule 12, migration 0010) ---------
+#
+# Only M-Pesa money is ever payable. A cash sale's maker share is recorded as
+# 'cash_held' (the maker already holds the notes); its driver share becomes a debt the
+# maker owes the driver, settled by moving whole available entries of the maker's to
+# the driver (plus change back to the maker), never by B2C. So the payable entries
+# (pending/available/frozen/paid) always add up to exactly the M-Pesa money collected.
+
+# Serializes everything that spends or pays out entries: debt settlement and payout
+# initiation. Held until the caller's transaction commits or rolls back.
+MONEY_LOCK_KEY = 7_262_021
+
+
+async def lock_money(session: AsyncSession) -> None:
+    await session.execute(text("select pg_advisory_xact_lock(:key)"), {"key": MONEY_LOCK_KEY})
+
+
+async def record_cash_sale(session: AsyncSession, txn) -> None:
+    """A cash sale has just reached cash_confirmed. Records the maker's share as held
+    in cash, opens the driver's share as a debt, then tries to settle it at once."""
+    if txn.maker_amount > 0:
+        await session.execute(
+            text(
+                "insert into wallet_ledger_entries (recipient_type, recipient_id, amount, status, transaction_id) "
+                "values ('maker', :producer_id, :amount, 'cash_held', :txn_id)"
+            ),
+            {"producer_id": txn.producer_id, "amount": txn.maker_amount, "txn_id": txn.id},
+        )
+    if txn.driver_id is not None and txn.driver_amount > 0:
+        await session.execute(
+            text(
+                "insert into cash_debts (transaction_id, producer_id, driver_id, amount) "
+                "values (:txn_id, :producer_id, :driver_id, :amount)"
+            ),
+            {"txn_id": txn.id, "producer_id": txn.producer_id, "driver_id": txn.driver_id, "amount": txn.driver_amount},
+        )
+        await settle_debts(session, txn.producer_id)
+
+
+async def blocking_withdrawal(session: AsyncSession, recipient_type: str, recipient_id):
+    """A withdrawal that must resolve before another starts: one still in flight, or
+    a failed retry (retry_of set) that now waits for a coordinator. A failed first
+    attempt doesn't block — it gets its automatic retry straight away, and if that
+    never happened (refused, or the process restarted first) a later on-demand
+    withdrawal or sweep is the next attempt."""
+    return (
+        await session.execute(
+            text(
+                "select id, status from withdrawal_requests where recipient_type = :rtype and recipient_id = :rid "
+                "and (status in ('requested', 'processing') or (status = 'failed' and retry_of is not null)) limit 1"
+            ),
+            {"rtype": recipient_type, "rid": recipient_id},
+        )
+    ).one_or_none()
+
+
+async def settle_debts(session: AsyncSession, producer_id) -> int:
+    """Settles, oldest first, every outstanding debt this maker can cover in full from
+    their available balance. Partial settlement isn't a thing: a debt waits until it
+    fits. Skips debts whose cash sale is disputed (rule 13), and does nothing while a
+    payout of the maker's is in flight or awaiting a coordinator retry, because that
+    payout's amount was sized from these same entries. Returns how many it settled.
+    Doesn't commit; the caller does."""
+    await lock_money(session)
+    if await blocking_withdrawal(session, "maker", producer_id) is not None:
+        return 0
+    debts = (
+        await session.execute(
+            text(
+                """
+                select d.id, d.transaction_id, d.driver_id, d.amount
+                from cash_debts d join transactions t on t.id = d.transaction_id
+                where d.producer_id = :pid and d.status = 'outstanding' and t.status <> 'disputed'
+                order by d.created_at
+                """
+            ),
+            {"pid": producer_id},
+        )
+    ).all()
+    settled = 0
+    for debt in debts:
+        entries = (
+            await session.execute(
+                text(
+                    "select id, amount, transaction_id from wallet_ledger_entries "
+                    "where recipient_type = 'maker' and recipient_id = :pid and status = 'available' "
+                    "order by created_at, id for update"
+                ),
+                {"pid": producer_id},
+            )
+        ).all()
+        if sum((e.amount for e in entries), Decimal(0)) < debt.amount:
+            continue
+        spent, total = [], Decimal(0)
+        for e in entries:
+            spent.append(e)
+            total += e.amount
+            if total >= debt.amount:
+                break
+        await session.execute(
+            text("update wallet_ledger_entries set status = 'transferred', settlement_id = :sid where id = any(:ids)"),
+            {"sid": debt.id, "ids": [e.id for e in spent]},
+        )
+        await session.execute(
+            text(
+                "insert into wallet_ledger_entries (recipient_type, recipient_id, amount, status, transaction_id, settlement_id) "
+                "values ('driver', :did, :amount, 'available', :txn_id, :sid)"
+            ),
+            {"did": debt.driver_id, "amount": debt.amount, "txn_id": debt.transaction_id, "sid": debt.id},
+        )
+        change = total - debt.amount
+        if change > 0:
+            # The change keeps the transaction of the entry it came from, so a dispute
+            # on that M-Pesa sale can still freeze it.
+            await session.execute(
+                text(
+                    "insert into wallet_ledger_entries (recipient_type, recipient_id, amount, status, transaction_id, settlement_id) "
+                    "values ('maker', :pid, :amount, 'available', :txn_id, :sid)"
+                ),
+                {"pid": producer_id, "amount": change, "txn_id": spent[-1].transaction_id, "sid": debt.id},
+            )
+        await session.execute(
+            text("update cash_debts set status = 'settled', settled_at = now() where id = :id"), {"id": debt.id}
+        )
+        settled += 1
+    return settled
+
+
+async def available_balance(session: AsyncSession, recipient_type: str, recipient_id) -> Decimal:
+    """Sum of available entries. Every one is M-Pesa money: cash shares are 'cash_held'."""
+    return (
+        await session.execute(
+            text(
+                "select coalesce(sum(amount), 0) from wallet_ledger_entries "
+                "where recipient_type = :rtype and recipient_id = :rid and status = 'available'"
+            ),
+            {"rtype": recipient_type, "rid": recipient_id},
+        )
+    ).scalar_one()
+
+
+async def outstanding_debt(session: AsyncSession, producer_id) -> Decimal:
+    """What this maker still owes drivers from cash sales, leaving out disputed sales
+    (rule 13: excluded from every withdrawal calculation until resolved)."""
+    return (
+        await session.execute(
+            text(
+                "select coalesce(sum(d.amount), 0) from cash_debts d join transactions t on t.id = d.transaction_id "
+                "where d.producer_id = :pid and d.status = 'outstanding' and t.status <> 'disputed'"
+            ),
+            {"pid": producer_id},
+        )
+    ).scalar_one()
+
+
+async def payable_balance(session: AsyncSession, recipient_type: str, recipient_id) -> Decimal:
+    """What a payout may send: the available M-Pesa-sourced balance, minus (for a
+    maker) what they still owe drivers. Never negative."""
+    balance = await available_balance(session, recipient_type, recipient_id)
+    if recipient_type == "maker":
+        balance -= await outstanding_debt(session, recipient_id)
+    return max(balance, Decimal(0))

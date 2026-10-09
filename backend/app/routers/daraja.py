@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import payouts
 from ..db import get_session
-from ..ledger import write_ledger_entries
+from ..ledger import settle_debts, write_ledger_entries
 
 router = APIRouter(prefix="/daraja", tags=["daraja"], include_in_schema=False)
 
@@ -65,6 +65,10 @@ async def stk_callback(payload: dict[str, Any], session: Annotated[AsyncSession,
         maker_amount=updated.maker_amount,
         driver_amount=updated.driver_amount,
     )
+    await session.commit()
+    # New M-Pesa earnings may now cover a debt this maker owes a driver from a cash
+    # sale (rule 12): settle it as soon as they do.
+    await settle_debts(session, updated.producer_id)
     await session.commit()
     return ACK
 

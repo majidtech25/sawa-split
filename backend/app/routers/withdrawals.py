@@ -33,7 +33,7 @@ async def request_withdrawal(
     session: Annotated[AsyncSession, Depends(get_session)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> WithdrawalResponse:
-    """On-demand withdrawal (CLAUDE.md rule 9: always the full balance, >= KES 500)
+    """On-demand withdrawal (CLAUDE.md rule 9: always the full payable balance, >= KES 500)
     via a real Daraja B2C payout. The one automatic retry on failure (rule 11) is
     handled inside payouts.start_payout or by the B2C callback."""
     recipient_type, recipient_id = await resolve_producer_or_driver(session, authorization)
@@ -42,7 +42,8 @@ async def request_withdrawal(
     try:
         row = await payouts.start_payout(session, recipient_type, recipient_id)
     except payouts.PayoutRefused as exc:
-        code = status.HTTP_422_UNPROCESSABLE_ENTITY if "threshold" in str(exc) else status.HTTP_409_CONFLICT
+        balance_reason = "threshold" in str(exc) or "owed to drivers" in str(exc)
+        code = status.HTTP_422_UNPROCESSABLE_ENTITY if balance_reason else status.HTTP_409_CONFLICT
         raise HTTPException(code, str(exc)) from exc
 
     if row.status == "failed":

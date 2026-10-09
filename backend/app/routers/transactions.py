@@ -14,7 +14,7 @@ from .. import daraja, links, supabase_auth
 from ..caller import normalize_phone
 from ..config import settings
 from ..db import get_session
-from ..ledger import compute_split, write_ledger_entries
+from ..ledger import compute_split, record_cash_sale
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -349,13 +349,8 @@ async def confirm_cash(
         await session.commit()
         return TransactionStateResponse(id=str(refreshed.id), status="cash_confirmed")
 
-    await write_ledger_entries(
-        session,
-        transaction_id=updated.id,
-        producer_id=updated.producer_id,
-        driver_id=updated.driver_id,
-        maker_amount=updated.maker_amount,
-        driver_amount=updated.driver_amount,
-    )
+    # The cash never reaches the M-Pesa account: the maker's share is recorded as
+    # held in cash and the driver's becomes a debt the maker owes (rule 12).
+    await record_cash_sale(session, updated)
     await session.commit()
     return TransactionStateResponse(id=str(updated.id), status=updated.status)

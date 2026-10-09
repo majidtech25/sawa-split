@@ -6,6 +6,10 @@ Funds never leave 'available' until a B2C success callback marks them 'paid'
 to available" — rule 11's first clause holds by construction. What this module adds
 is the retry policy: a first failure is retried once automatically; a failed retry
 waits for a coordinator.
+
+Only M-Pesa money is ever paid out (rule 12, migration 0010): a maker is paid their
+available balance minus what they owe drivers from cash sales, and _initiate refuses,
+loudly, any B2C call that would send out more than M-Pesa has collected.
 """
 
 import logging
@@ -18,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import daraja
+from .ledger import available_balance, blocking_withdrawal, lock_money, outstanding_debt, payable_balance, settle_debts
 from .config import settings
 from .db import async_session
 
@@ -31,53 +36,41 @@ class PayoutRefused(Exception):
     """The recipient can't be paid out right now; the message says why."""
 
 
-async def available_balance(session: AsyncSession, recipient_type: str, recipient_id) -> Decimal:
-    row = (
-        await session.execute(
-            text(
-                "select coalesce(sum(amount), 0) as total from wallet_ledger_entries "
-                "where recipient_type = :rtype and recipient_id = :rid and status = 'available'"
-            ),
-            {"rtype": recipient_type, "rid": recipient_id},
-        )
-    ).one()
-    return row.total
+class PayoutCapExceeded(RuntimeError):
+    """A B2C payout would send more than the M-Pesa money behind it. Never expected:
+    raised (and logged as critical) instead of paying, so a ledger bug can't turn into
+    paying one person with money owed to others."""
 
 
-async def _blocking_withdrawal(session: AsyncSession, recipient_type: str, recipient_id):
-    """A withdrawal that must resolve before another starts: one still in flight, or
-    a failed retry (retry_of set) that now waits for a coordinator. A failed first
-    attempt doesn't block — it gets its automatic retry straight away, and if that
-    never happened (refused, or the process restarted first) a later on-demand
-    withdrawal or sweep is the next attempt."""
-    return (
-        await session.execute(
-            text(
-                "select id, status from withdrawal_requests where recipient_type = :rtype and recipient_id = :rid "
-                "and (status in ('requested', 'processing') or (status = 'failed' and retry_of is not null)) limit 1"
-            ),
-            {"rtype": recipient_type, "rid": recipient_id},
-        )
-    ).one_or_none()
+async def start_payout(session: AsyncSession, recipient_type: str, recipient_id, *, minimum=MIN_WITHDRAWAL_AMOUNT):
+    """A first payout attempt: the full payable balance (rule 9), >= KES 500, via
+    B2C. `minimum` is lowered only for a closing account's final payout. Raises
+    PayoutRefused if the recipient can't be paid now. If B2C initiation itself
+    fails, the one automatic retry (rule 11) runs here, straight away; a failure the
+    B2C callback reports later gets its retry from the callback instead. Returns the
+    latest attempt's row."""
+    if recipient_type == "maker":
+        # Drivers are owed first: settle what the maker can cover, and keep it even
+        # if this payout is then refused.
+        await settle_debts(session, recipient_id)
+        await session.commit()
 
-
-async def start_payout(session: AsyncSession, recipient_type: str, recipient_id):
-    """A first payout attempt: the full available balance (rule 9), >= KES 500, via
-    B2C. Raises PayoutRefused if the recipient can't be paid now. If B2C initiation
-    itself fails, the one automatic retry (rule 11) runs here, straight away; a
-    failure the B2C callback reports later gets its retry from the callback instead.
-    Returns the latest attempt's row."""
-    blocking = await _blocking_withdrawal(session, recipient_type, recipient_id)
+    await lock_money(session)
+    blocking = await blocking_withdrawal(session, recipient_type, recipient_id)
     if blocking is not None:
         if blocking.status == "failed":
             raise PayoutRefused("A previous payout failed and is waiting for the coordinator to retry it.")
         raise PayoutRefused("A withdrawal is already in progress.")
 
-    balance = await available_balance(session, recipient_type, recipient_id)
-    if balance < MIN_WITHDRAWAL_AMOUNT:
-        raise PayoutRefused(
-            f"Available balance (KES {balance}) is below the KES {MIN_WITHDRAWAL_AMOUNT} withdrawal threshold."
+    balance = await payable_balance(session, recipient_type, recipient_id)
+    owed = await outstanding_debt(session, recipient_id) if recipient_type == "maker" else Decimal(0)
+    if balance <= 0 or balance < minimum:
+        reason = (
+            f"Payable balance (KES {balance}) is below the KES {minimum} withdrawal threshold."
+            if balance > 0 or not owed
+            else f"KES {owed} from cash sales is still owed to drivers, and is paid from your M-Pesa earnings first."
         )
+        raise PayoutRefused(reason)
     row, initiated = await _initiate(session, recipient_type, recipient_id, balance)
     if not initiated:
         try:
@@ -95,6 +88,7 @@ async def retry_payout(session: AsyncSession, failed_id, *, automatic: bool):
     (a fast callback and the code that started the payout, or a redelivered
     callback) can't both succeed: the loser gets None. Raises PayoutRefused if the
     funds are no longer available (e.g. frozen by a dispute)."""
+    await lock_money(session)
     failed = await _withdrawal(session, failed_id)
     if failed.status != "failed" or (automatic and failed.retry_of is not None):
         return None
@@ -119,6 +113,7 @@ async def _initiate(session: AsyncSession, recipient_type: str, recipient_id, am
     # Everything that can fail before Daraja is called happens before the withdrawal
     # row is committed: a row committed as 'requested' that never reaches B2C would
     # count as in flight and block this recipient indefinitely.
+    await _check_mpesa_cover(session, recipient_type, recipient_id, amount)
     phone_row = (
         await session.execute(
             text(f"select phone from {'producers' if recipient_type == 'maker' else 'drivers'} where id = :id"),
@@ -183,6 +178,35 @@ async def _initiate(session: AsyncSession, recipient_type: str, recipient_id, am
     return await _withdrawal(session, row.id), True
 
 
+async def _check_mpesa_cover(session: AsyncSession, recipient_type: str, recipient_id, amount: Decimal) -> None:
+    """The last line of defence before B2C: everything sent or being sent, plus this
+    payout, must fit within the M-Pesa money collected, and this payout within the
+    recipient's own available entries. Runs under the money lock."""
+    t = (
+        await session.execute(
+            text(
+                """
+                select
+                  (select coalesce(sum(total_amount), 0) from transactions
+                     where payment_method = 'mpesa' and status in ('confirmed', 'disputed')) as collected,
+                  (select coalesce(sum(amount), 0) from withdrawal_requests
+                     where status in ('requested', 'processing', 'paid')) as committed
+                """
+            )
+        )
+    ).one()
+    own = await available_balance(session, recipient_type, recipient_id)
+    problem = None
+    if t.committed + amount > t.collected:
+        problem = f"M-Pesa collected KES {t.collected}, already paid or paying KES {t.committed}"
+    elif amount > own:
+        problem = f"the recipient's available M-Pesa-sourced balance is only KES {own}"
+    if problem:
+        await session.rollback()
+        log.critical("REFUSED B2C payout of KES %s to %s %s: %s", amount, recipient_type, recipient_id, problem)
+        raise PayoutCapExceeded(f"Refused a KES {amount} payout: {problem}. Nothing was sent; check the ledger.")
+
+
 async def _withdrawal(session: AsyncSession, withdrawal_id):
     return (
         await session.execute(text("select * from withdrawal_requests where id = :id"), {"id": withdrawal_id})
@@ -207,6 +231,15 @@ async def run_daily_sweep() -> list[dict]:
     today_eat = datetime.now(EAT).date()
     results = []
     async with async_session() as session:
+        # Rule 12: settle every maker -> driver cash debt that M-Pesa earnings now
+        # cover, so drivers are paid in this same sweep.
+        debtors = (
+            await session.execute(text("select distinct producer_id from cash_debts where status = 'outstanding'"))
+        ).scalars().all()
+        for producer_id in debtors:
+            await settle_debts(session, producer_id)
+            await session.commit()
+
         candidates = (
             await session.execute(
                 text(
@@ -238,6 +271,7 @@ async def run_daily_sweep() -> list[dict]:
             try:
                 w = await start_payout(session, c.recipient_type, c.recipient_id)
             except PayoutRefused as exc:
+                await session.rollback()  # releases the money lock
                 results.append({"recipient_type": c.recipient_type, "recipient_id": str(c.recipient_id), "skipped": str(exc)})
                 continue
             except Exception as exc:  # one recipient's error mustn't stop everyone else's payout

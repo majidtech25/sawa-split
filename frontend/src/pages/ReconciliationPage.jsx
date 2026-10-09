@@ -68,7 +68,8 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
         <LiveIndicator live={live} />
       </div>
       <p className="mt-1 text-[15px] text-sawa-text-muted">
-        Every shilling collected is either paid out or still owed to a maker or driver.
+        Every M-Pesa shilling collected is either paid out or still owed to a maker or driver. Cash stays with the
+        maker, so it's shown beside these totals, not in them.
       </p>
 
       <div className="mt-4">
@@ -78,12 +79,21 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
       {t && (
         <>
           <section aria-label="Totals" className="mt-6 grid gap-3 md:grid-cols-3">
-            <Tile label="Collected" value={t.collected} note="M-Pesa and confirmed cash" />
+            <Tile label="Collected" value={t.collected} note="M-Pesa only: what reached the account" />
             <Tile label="Paid out" value={t.disbursed} note="Sent by M-Pesa B2C" tone="text-sawa-green" />
             <Tile
               label="Still owed"
               value={t.pending}
               note={Number(t.frozen) > 0 ? `${ksh(t.frozen)} frozen by disputes` : "Makers' and drivers' balances"}
+            />
+          </section>
+
+          <section aria-label="Cash" className="mt-3 grid gap-3 md:grid-cols-3">
+            <Tile label="Cash recorded" value={t.cash_recorded} note="Confirmed cash sales. Held by makers, never paid out by M-Pesa." />
+            <Tile
+              label="Owed to drivers"
+              value={t.debts_outstanding}
+              note="Drivers' shares of cash sales, moved from makers' M-Pesa earnings as they come in"
             />
           </section>
 
@@ -158,6 +168,41 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
               </table>
             </div>
           </section>
+
+          {data.debts.length > 0 && (
+            <section className="mt-8">
+              <h2 className="text-lg font-semibold">Cash debts</h2>
+              <p className="mt-1 text-sm text-sawa-text-muted">
+                Each maker owes the driver's share of a referred cash sale. It's settled from the maker's next M-Pesa
+                earnings, never paid out of anyone else's money.
+              </p>
+              <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
+                <table className="w-full min-w-[560px] border-collapse">
+                  <thead>
+                    <tr>
+                      <Th>Since (EAT)</Th>
+                      <Th>Maker owes</Th>
+                      <Th>Driver</Th>
+                      <Th right>Amount</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.debts.map((d) => (
+                      <tr key={d.id}>
+                        <Td mono>{eatDateTime(d.created_at)}</Td>
+                        <Td>{d.producer_name}</Td>
+                        <Td>{d.driver_name}</Td>
+                        <Td right mono>
+                          {ksh(d.amount)}
+                          {d.disputed && <span className="ml-2 font-sans text-xs text-sawa-text-muted">on hold: disputed</span>}
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           <section className="mt-8">
             <h2 className="text-lg font-semibold">Payouts</h2>

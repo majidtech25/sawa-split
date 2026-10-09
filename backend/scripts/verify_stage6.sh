@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Verifies stage 6 against the real Daraja sandbox, with no STK Push (so no real
-# money): a cash Case A sale (rule 12) funds both parties, then:
+# money): a simulated M-Pesa sale (scripts/simulate_mpesa_sale.py + a simulated
+# callback to the real /daraja/stk-callback) funds both parties. Cash sales can't fund
+# a payout any more (rule 12, migration 0010: only M-Pesa money is payable; see
+# verify_stage4.sh for the cash rules). Then:
 #   - the 18:00 sweep (run now via scripts/run_sweep.py) pays the producer by real B2C
-#     and the cash-sourced ledger entry reaches 'paid' (rules 10, 12);
+#     and the M-Pesa-sourced ledger entry reaches 'paid' (rule 10);
 #   - the driver's payout fails for real (ResultCode 2040: the sandbox only pays its
 #     test MSISDN, and the driver fixture's phone isn't it), gets exactly one
 #     automatic retry, which also fails and waits for a coordinator (rule 11);
@@ -66,7 +69,9 @@ cleanup() {
     -- retries reference the withdrawal they replace, so clear the links first
     update withdrawal_requests set retry_of = null where recipient_id in ('$PRODUCER_ID', '$DRIVER_ID') and requested_at >= '$STARTED_AT';
     delete from withdrawal_requests where recipient_id in ('$PRODUCER_ID', '$DRIVER_ID') and requested_at >= '$STARTED_AT';
-    delete from wallet_ledger_entries where transaction_id in ($ids);
+    delete from wallet_ledger_entries where transaction_id in ($ids)
+      or settlement_id in (select id from cash_debts where transaction_id in ($ids));
+    delete from cash_debts where transaction_id in ($ids);
     delete from transactions where id in ($ids);
     commit;" && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
 }
@@ -90,15 +95,15 @@ STARTED_AT=$(q "select now();")
 trap cleanup EXIT
 
 echo
-echo "== Setup: cash Case A sale, product 2000 + photo 10 (maker 1410, driver 600) =="
-TXN=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
-  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":2000,\"photo_enabled\":true,\"photo_amount\":10,\"link_sig\":\"$(sig "$PRODUCER_ID" 2000 10 "$DRIVER_QR")\"}")
-TXN_ID=$(echo "$TXN" | json "['id']")
-[ -n "$TXN_ID" ] || { echo "FATAL: could not create the cash sale: $TXN"; exit 1; }
+echo "== Setup: simulated M-Pesa sale, product 2000 + photo 10 (maker 1410, driver 600) =="
+SALE=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 2000 10 "$DRIVER_ID")
+TXN_ID=$(echo "$SALE" | json "['id']")
+[ -n "$TXN_ID" ] || { echo "FATAL: could not create the simulated M-Pesa sale: $SALE"; exit 1; }
 TXN_IDS+=("$TXN_ID")
-curl -s -X POST "$BASE_URL/transactions/$TXN_ID/confirm" -H "Authorization: Bearer $DRIVER_TOKEN" -H "Content-Type: application/json" -d '{}' >/dev/null
-CONFIRMED=$(curl -s -X POST "$BASE_URL/transactions/$TXN_ID/confirm" -H "Authorization: Bearer $PRODUCER_TOKEN" -H "Content-Type: application/json" -d '{}')
-check "cash sale confirmed by driver + maker" "$(echo "$CONFIRMED" | json "['status']")" "cash_confirmed"
+curl -s -X POST "$BASE_URL/daraja/stk-callback" -H "Content-Type: application/json" -d "{
+  \"Body\": {\"stkCallback\": {\"CheckoutRequestID\": \"$(echo "$SALE" | json "['checkout_request_id']")\", \"ResultCode\": 0,
+  \"CallbackMetadata\": {\"Item\": [{\"Name\": \"MpesaReceiptNumber\", \"Value\": \"SIM${TXN_ID:0:8}\"}]}}}}" >/dev/null
+check "simulated callback confirmed the M-Pesa sale" "$(q "select status from transactions where id = '$TXN_ID';")" "confirmed"
 check "maker 1410 available" "$(q "select amount from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'maker' and status = 'available';")" "1410.00"
 check "driver 600 available" "$(q "select amount from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'driver' and status = 'available';")" "600.00"
 
@@ -113,7 +118,7 @@ check "sweep created a full-balance driver withdrawal" "$(q "select amount from 
 echo "Waiting for the real B2C callbacks (up to 120s)..."
 wait_for "producer payout reaches 'paid'" "select status from withdrawal_requests where id = '$P_W1';" "paid" 120
 check "producer payout has a real B2C receipt" "$([ -n "$(q "select b2c_receipt from withdrawal_requests where id = '$P_W1';")" ] && echo yes || echo no)" "yes"
-check "cash-sourced maker ledger entry reached 'paid'" "$(q "select status from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'maker';")" "paid"
+check "M-Pesa-sourced maker ledger entry reached 'paid'" "$(q "select status from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'maker';")" "paid"
 
 echo
 echo "== Test 2: driver payout fails (2040), one automatic retry, then waits (rule 11) =="

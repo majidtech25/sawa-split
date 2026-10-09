@@ -45,3 +45,10 @@ bash migrations/verify_0007_rls_phone.sh
 0008 adds `withdrawal_requests.retry_of`, linking a payout retry to the failed
 withdrawal it replaces (rule 11: one automatic retry, then manual coordinator
 retries). Exercised end to end by `scripts/verify_stage6.sh`.
+
+0010 fixes the cash-sale money gap (CLAUDE.md rules 10 and 12, revised 2026-10-09):
+a confirmed cash sale's maker share becomes a `cash_held` ledger entry (never
+payable), and the driver's share a `cash_debts` row the maker owes, settled from
+their M-Pesa-sourced balance (entries marked `transferred`, new entries for the
+driver and the maker's change). Exercised by `scripts/verify_stage4.sh` (no Daraja
+calls) and `scripts/verify_stage6.sh` (real sandbox B2C, simulated M-Pesa funding).

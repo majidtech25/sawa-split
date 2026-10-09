@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { supabase } from "./supabase"
 
-const TABLES = ["transactions", "wallet_ledger_entries", "withdrawal_requests"]
+const TABLES = ["transactions", "wallet_ledger_entries", "withdrawal_requests", "cash_debts"]
 
 // Calls `onChange` (debounced) whenever a row the signed-in user can see changes in
 // one of the money tables. Supabase Realtime applies RLS, so a producer or driver

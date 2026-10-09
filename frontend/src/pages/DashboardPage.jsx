@@ -8,14 +8,17 @@ import { currentProfile, supabase } from "../lib/supabase"
 
 const WITHDRAW_THRESHOLD = 500 // CLAUDE.md rule 9
 
-// Everything here is read with the user's own session; Row Level Security limits
-// each query to their own rows (migrations 0002 + 0007).
+// Lists are read with the user's own session; Row Level Security limits each query
+// to their own rows (migrations 0002 + 0007). Balances come from the API, which
+// applies the payout rules: only M-Pesa money is payable, and a maker's cash-sale
+// debts to drivers come first (CLAUDE.md rule 12).
 async function loadDashboard(profile) {
   const isMaker = profile.role === "producer"
   const own = isMaker
     ? supabase.from("producers").select("name, site").single()
     : supabase.from("drivers").select("name").single()
-  const [me, ledger, txns, withdrawals] = await Promise.all([
+  const [account, me, ledger, txns, withdrawals] = await Promise.all([
+    api("/accounts/me", { auth: true }),
     own,
     supabase.from("wallet_ledger_entries").select("amount, status"),
     supabase
@@ -39,7 +42,11 @@ async function loadDashboard(profile) {
   return {
     name: me.data.name,
     site: me.data.site,
-    available: sum("available"),
+    payable: Number(account.payable),
+    available: Number(account.available),
+    owedToDrivers: Number(account.owed_to_drivers),
+    owedByMakers: Number(account.owed_by_makers),
+    cashHeld: Number(account.cash_held),
     pending: sum("pending"),
     frozen: sum("frozen"),
     transactions: txns.data,
@@ -55,7 +62,7 @@ function needsMyConfirmation(row, role) {
   return row.driver_id && !row.driver_confirmed_at
 }
 
-function WithdrawPanel({ available, withdrawals, onWithdrawn }) {
+function WithdrawPanel({ available, owedToDrivers, withdrawals, onWithdrawn }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const latest = withdrawals[0]
@@ -79,6 +86,7 @@ function WithdrawPanel({ available, withdrawals, onWithdrawn }) {
 
   let label = `Withdraw ${ksh(available)}`
   if (belowThreshold) label = `Withdraw unlocks at ${ksh(WITHDRAW_THRESHOLD)} (you have ${ksh(available)})`
+  if (belowThreshold && owedToDrivers > 0) label = `Withdraw unlocks once drivers are paid`
   if (inFlight) label = `Paying out ${ksh(latest.amount)}…`
   if (busy) label = "Starting your payout…"
 
@@ -164,7 +172,26 @@ export default function DashboardPage() {
           </p>
         )}
         <p className="text-[13px] text-sawa-text-muted">Available balance</p>
-        <p className="font-mono text-[40px] font-bold leading-tight tabular-nums">{ksh(data.available)}</p>
+        <p className="font-mono text-[40px] font-bold leading-tight tabular-nums">{ksh(data.payable)}</p>
+        {data.owedToDrivers > 0 && (
+          <p className="text-[13px] text-sawa-text-muted">
+            You owe drivers <span className="font-mono text-sawa-text">{ksh(data.owedToDrivers)}</span> from cash sales. It's
+            paid from your M-Pesa earnings first
+            {data.available > 0 && <> (you have <span className="font-mono">{ksh(data.available)}</span> toward it)</>}.
+          </p>
+        )}
+        {data.owedByMakers > 0 && (
+          <p className="text-[13px] text-sawa-text-muted">
+            Makers owe you <span className="font-mono text-sawa-text">{ksh(data.owedByMakers)}</span> from cash sales. It
+            reaches your balance as soon as they earn it by M-Pesa.
+          </p>
+        )}
+        {data.cashHeld > 0 && (
+          <p className="text-[13px] text-sawa-text-muted">
+            Cash sales already in your hands: <span className="font-mono">{ksh(data.cashHeld)}</span>. Cash is never paid out
+            again by M-Pesa.
+          </p>
+        )}
         {(data.pending > 0 || data.frozen > 0) && (
           <p className="text-[13px] text-sawa-text-muted">
             {data.pending > 0 && <>Clearing: <span className="font-mono">{ksh(data.pending)}</span></>}
@@ -174,7 +201,7 @@ export default function DashboardPage() {
         )}
       </section>
 
-      <WithdrawPanel available={data.available} withdrawals={data.withdrawals} onWithdrawn={load} />
+      <WithdrawPanel available={data.payable} owedToDrivers={data.owedToDrivers} withdrawals={data.withdrawals} onWithdrawn={load} />
 
       <section>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-sawa-text-muted">
