@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, Wallet } from "lucide-react"
-import { ErrorNote, LiveIndicator, Screen, SecondaryButton, StatusBadge } from "../components/ui"
+import { ErrorNote, LiveIndicator, Screen, SecondaryButton, StatusBadge, TextArea } from "../components/ui"
 import { api } from "../lib/api"
-import { eatDateTime, ksh, wasCredited } from "../lib/format"
+import { eatDate, eatDateTime, ksh, wasCredited } from "../lib/format"
 import { useLiveChanges } from "../lib/realtime"
 import { currentProfile, supabase } from "../lib/supabase"
 
@@ -47,6 +47,8 @@ async function loadDashboard(profile) {
     owedToDrivers: Number(account.owed_to_drivers),
     owedByMakers: Number(account.owed_by_makers),
     cashHeld: Number(account.cash_held),
+    accountStatus: account.account_status,
+    closure: account.closure,
     pending: sum("pending"),
     frozen: sum("frozen"),
     transactions: txns.data,
@@ -109,6 +111,115 @@ function WithdrawPanel({ available, owedToDrivers, withdrawals, onWithdrawn }) {
       </p>
       <ErrorNote>{error}</ErrorNote>
     </div>
+  )
+}
+
+const quietButton =
+  "text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+
+// Closing an account is asked for here and decided by the coordinator (CLAUDE.md
+// rule 17). Nothing is deleted: the history stays, and what's owed is paid out first.
+function CloseAccount({ closure, accountStatus, payable, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState("")
+  const [fieldError, setFieldError] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  async function send(path, body) {
+    setBusy(true)
+    setError(null)
+    try {
+      await api(path, { method: "POST", auth: true, body })
+      setOpen(false)
+      setReason("")
+      await onChange()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function submit(event) {
+    event.preventDefault()
+    if (!reason.trim()) {
+      setFieldError("Say why, so your coordinator can help.")
+      return
+    }
+    setFieldError(null)
+    send("/accounts/me/closure", { reason: reason.trim() })
+  }
+
+  if (accountStatus === "closing") {
+    return (
+      <section aria-label="Closing your account" className="rounded-sawa border border-sawa-border bg-sawa-surface p-4 text-sm">
+        <p className="font-semibold">Your account is being closed.</p>
+        <p className="mt-1 text-sawa-text-muted">
+          Your coordinator approved it. Everything you're owed is being paid out to M-Pesa, and the account closes as soon
+          as that payout goes through. Your sales history is kept.
+        </p>
+      </section>
+    )
+  }
+
+  if (closure?.status === "pending") {
+    return (
+      <section aria-label="Closing your account" className="flex flex-col gap-2 border-t border-sawa-border pt-4 text-sm">
+        <p>
+          You asked to close your account on {eatDate(closure.requested_at)}. Your coordinator will review it.
+        </p>
+        <p className="text-sawa-text-muted">Your reason: {closure.reason}</p>
+        <div>
+          <button type="button" onClick={() => send("/accounts/me/closure/cancel", {})} disabled={busy} className={quietButton}>
+            {busy ? "Cancelling…" : "Cancel this request"}
+          </button>
+        </div>
+        <ErrorNote>{error}</ErrorNote>
+      </section>
+    )
+  }
+
+  return (
+    <section aria-label="Close my account" className="flex flex-col gap-3 border-t border-sawa-border pt-4 text-sm">
+      {closure?.status === "rejected" && (
+        <p className="text-sawa-text-muted">
+          Your coordinator didn't approve closing your account on {eatDate(closure.decided_at)}: {closure.decision_reason}
+        </p>
+      )}
+      {!open ? (
+        <div>
+          <button type="button" onClick={() => setOpen(true)} className={quietButton}>
+            Close my account
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={submit} noValidate className="flex flex-col gap-3">
+          <p className="text-sawa-text-muted">
+            Your coordinator reviews the request. If they approve it, everything you're owed
+            {payable > 0 ? <> (<span className="font-mono">{ksh(payable)}</span> now)</> : null} is paid to your M-Pesa
+            first, even below {ksh(WITHDRAW_THRESHOLD)}. Then you can't log in or take sales any more. Your history is kept.
+          </p>
+          <TextArea
+            id="closure-reason"
+            label="Why do you want to close your account?"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            error={fieldError}
+            maxLength={1000}
+          />
+          <div className="flex items-center gap-4">
+            <SecondaryButton type="submit" disabled={busy}>
+              {busy ? "Sending…" : "Ask to close my account"}
+            </SecondaryButton>
+            <button type="button" onClick={() => setOpen(false)} className={quietButton}>
+              Keep my account
+            </button>
+          </div>
+          <ErrorNote>{error}</ErrorNote>
+        </form>
+      )}
+    </section>
   )
 }
 
@@ -256,6 +367,8 @@ export default function DashboardPage() {
           </ul>
         </section>
       )}
+
+      <CloseAccount closure={data.closure} accountStatus={data.accountStatus} payable={data.payable} onChange={load} />
     </Screen>
   )
 }

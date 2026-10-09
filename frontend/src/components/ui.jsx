@@ -63,6 +63,32 @@ export function Field({ id, label, hint, error, ...inputProps }) {
   )
 }
 
+// For words (reasons, notes), so Inter rather than Field's mono.
+export function TextArea({ id, label, hint, error, rows = 3, ...inputProps }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] text-sawa-text-muted">
+        {label}
+      </label>
+      <textarea
+        id={id}
+        rows={rows}
+        {...inputProps}
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby={error || hint ? `${id}-note` : undefined}
+        className={`resize-y rounded-sawa border bg-sawa-surface px-3 py-2.5 text-[15px] text-sawa-text outline-none focus:border-2 focus:border-sawa-green ${
+          error ? "border-sawa-terracotta" : "border-sawa-border"
+        }`}
+      />
+      {(error || hint) && (
+        <p id={`${id}-note`} className={`text-xs ${error ? "text-sawa-terracotta" : "text-sawa-text-muted"}`}>
+          {error || hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function ErrorNote({ children }) {
   if (!children) return null
   return (

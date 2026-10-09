@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import supabase_auth
+from .. import lifecycle, supabase_auth
 from ..db import get_session
 from ..pin import hash_pin, verify_pin
 from ..security import require_admin
@@ -172,6 +172,17 @@ async def login(
     ).one_or_none()
     if credentials is None or not verify_pin(body.pin, credentials.pin_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid phone or PIN")
+
+    # Rule 17: a suspended or closed maker/driver can't log in, and is told why. Checked
+    # only after the PIN, so a wrong PIN learns nothing about the account.
+    for party_type, table in (("maker", "producers"), ("driver", "drivers")):
+        row = (
+            await session.execute(text(f"select id, account_status from {table} where phone = :phone"), {"phone": body.phone})
+        ).one_or_none()
+        if row is not None:
+            refusal = await lifecycle.login_refusal(session, party_type, row.id, row.account_status)
+            if refusal:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, refusal)
 
     try:
         auth_response = await supabase_auth.sign_in_with_password(

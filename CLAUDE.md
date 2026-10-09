@@ -70,7 +70,8 @@ site          text,
 default_split_driver_pct  numeric not null check (default_split_driver_pct <= 40), -- maker floor: 60%, applies to the product component only
 charges_product  boolean not null default true,
 charges_photo    boolean not null default false,
-active        boolean not null default true,
+account_status text not null default 'active' check (account_status in ('active','suspended','closing','closed')), -- rule 17
+active        boolean generated always as (account_status = 'active') stored,  -- derived; every "is it active" check reads this
 created_at    timestamptz not null default now(),
 constraint producers_at_least_one_component check (charges_product or charges_photo)
 
@@ -80,7 +81,8 @@ name          text not null,
 phone         text unique not null,
 till          text not null,
 qr_code       text unique not null,
-active        boolean not null default true,
+account_status text not null default 'active' check (account_status in ('active','suspended','closing','closed')), -- rule 17
+active        boolean generated always as (account_status = 'active') stored,
 created_at    timestamptz not null default now()
 
 -- transactions
@@ -148,6 +150,41 @@ status            text not null check (status in ('requested','processing','paid
 requested_at      timestamptz not null default now(),
 resolved_at       timestamptz
 
+-- closure_requests   (rule 17; party_type/party_id as in the ledger: 'maker' = producers.id, 'driver' = drivers.id)
+id              uuid primary key default gen_random_uuid(),
+party_type      text not null check (party_type in ('maker','driver')),
+party_id        uuid not null,
+reason          text not null,             -- required, non-blank
+status          text not null default 'pending' check (status in ('pending','cancelled','rejected','approved','closed')),
+requested_at    timestamptz not null default now(),
+decided_at      timestamptz,
+decided_by      uuid,                      -- coordinator's auth user id
+decision_reason text,                      -- required when rejected
+closed_at       timestamptz
+-- unique (party_type, party_id) where status in ('pending','approved'): one open request per account
+
+-- account_suspensions   (rule 17)
+id           uuid primary key default gen_random_uuid(),
+party_type   text not null check (party_type in ('maker','driver')),
+party_id     uuid not null,
+reason       text not null,                -- shown to the suspended person
+review_on    date not null,                -- default 7 days after suspension; past it, flagged overdue
+suspended_by uuid not null,
+suspended_at timestamptz not null default now(),
+lifted_at    timestamptz, lifted_by uuid, lift_reason text
+-- unique (party_type, party_id) where lifted_at is null
+
+-- account_audit_log   (rule 17: append-only; triggers refuse every UPDATE, DELETE and TRUNCATE)
+id          bigint generated always as identity primary key,
+at          timestamptz not null default now(),
+action      text not null check (action in ('closure_requested','closure_cancelled','closure_approved',
+              'closure_rejected','account_closed','suspended','unsuspended')),
+party_type  text not null, party_id uuid not null,
+actor_role  text not null check (actor_role in ('maker','driver','coordinator','system')),
+actor_id    uuid, actor_phone text,        -- who
+reason      text,                          -- why
+details     jsonb not null default '{}'
+
 -- sync_queue_items   (true offline/no-connectivity capture — a still-unbuilt future concern,
 -- distinct from cash-payment tracking, which now lives directly in `transactions` above via
 -- payment_method + the cash_* statuses. Do not repurpose this table for cash — it's for the
@@ -189,13 +226,19 @@ Storage: one Supabase Storage bucket, `qr-codes` — public read, coordinator-on
 14. **No partial withdrawals, no automatic dispute resolution, no public self-registration, no multi-currency/KYC/tax handling** — all explicitly out of scope.
 15. **Dynamic GPS/volume-scored referee commissions** — explicitly parked as a Phase 3+ pitch narrative, not built now. Use the fixed per-producer split only.
 16. **Only `cash_confirmed` referred transactions count toward a driver's clean-referral streak** for any future commission-rate review — a `cash_expired` referral does not count. This is what gives the driver a reason to chase confirmation rather than let it lapse.
+17. **Accounts are closed or suspended, never deleted** *(added 2026-10-09)*. All transactions and ledger history always stay.
+    - **Closure is requested by the maker or driver, and approved by a coordinator.** The request comes from a "Close my account" form on their dashboard, with a reason required, and they can cancel it while it's pending. The coordinator approves or rejects it from a "Closure requests" list; rejecting needs a reason. Approval is refused while the account has any of these, and the screen says which: a cash sale awaiting confirmation, an open dispute, a payout in progress or failed and awaiting a retry, an unsettled cash debt (owed by this maker, or owed to this driver), or an active suspension. A debt the maker can already cover is settled first, so it doesn't block.
+    - **On approval:** the account becomes `closing`, which means no new sales; the person can still log in to watch the payout. Its remaining payable balance (rule 10: M-Pesa-sourced, minus debts) is paid out by B2C, even below KES 500. Only when that payout succeeds is the account `closed`, or straight away if there's nothing to pay. If the payout fails, it stays `closing`, under the usual retry rules (rule 11).
+    - **A closed account** can't log in: refused by `POST /auth/login`, plus a Supabase Auth ban. Its price cards and QR stop working, because checkout, initiate and the driver page all require `active`.
+    - **Suspension is a coordinator's decision; no request is needed.** It requires a reason, and has a review date (default 7 days); the coordinator view flags overdue reviews. It blocks new sales and login, and the suspended person sees the reason at login and on any open session. Unsuspend is allowed, with a reason. Money earned honestly stays owed and is still paid by the normal rules, including the sweep. Only disputed sales stay frozen, until resolved (rule 13).
+    - **Audit log (`account_audit_log`):** append-only. It records every request, cancel, approve, reject, closure, suspend and unsuspend, with who, when and why, and the coordinator can read it. Nobody can edit or delete entries; database triggers refuse it, the API's own connection included.
 
 ## 5. Auth model
 
 Four roles, no public self-registration:
 
 - **Tourist** — no account. The public pay-initiate endpoint is the only surface, rate-limited per phone number. Cash Case B confirmation (rule 12) also needs no login — use a short-lived signed token tied to the transaction id, delivered via whatever already shows the tourist the price-transparency card (an in-page "I paid" button if she's still on the payment screen, or an SMS link if not). Do not require Supabase Auth for this — it would contradict "no account for tourists."
-- **Producer / Driver** — coordinator-onboarded via Supabase Auth's admin API, phone number as identifier + a 4-digit PIN issued in person. Logs in with phone + PIN. Cash-confirmation taps (rule 12, Case A/B for maker; Case A for driver) happen from their authenticated dashboard session.
+- **Producer / Driver** — coordinator-onboarded via Supabase Auth's admin API, phone number as identifier + a 4-digit PIN issued in person. Logs in with phone + PIN. Cash-confirmation taps (rule 12, Case A/B for maker; Case A for driver) happen from their authenticated dashboard session. A suspended or closed account (rule 17) is refused at login and on every API call, with the reason; a closed one is also banned in Supabase Auth.
 - **Coordinator/Admin** — same Supabase Auth mechanism, account carries an `is_admin` claim.
 
 Enforced twice: Supabase Row Level Security at the data layer, FastAPI endpoint checks at the API layer. Only FastAPI's service-role key (called **Secret key** under Supabase's current naming) writes to money-affecting tables — never exposed to the frontend, which uses the Publishable key instead.
@@ -205,8 +248,8 @@ RLS permission matrix:
 | Role | producers/drivers | transactions | wallet_ledger_entries | withdrawal_requests | admin actions |
 |---|---|---|---|---|---|
 | Tourist | — | create (via pay endpoint only) + confirm own cash txn (token-scoped) | — | — | — |
-| Producer/Driver | read own | read own + confirm own cash txn | read own | create/read own | — |
-| Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration |
+| Producer/Driver | read own | read own + confirm own cash txn | read own | create/read own | request/cancel own closure |
+| Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration, closure approve/reject, suspend/unsuspend, read audit log |
 
 ## 6. Money-movement sequence
 
@@ -228,7 +271,7 @@ Full interactive reference: the published Design Reference artifact (color/type/
 --sawa-radius: 8px; --sawa-space: 8px;
 ```
 
-Inter (UI/words) + IBM Plex Mono (numbers only, tabular-nums). Mobile-first, 420px max-width card-centered, except the coordinator reconciliation view (full width past 768px, plain table, never a chart) and the public homepage (full width, its own layout — see 7.1). Status states: pending / confirmed / failed for M-Pesa, plus `cash_unconfirmed` / `cash_confirmed` / `cash_expired` for cash — render the cash states visibly distinct from the M-Pesa three (an unconfirmed cash sale is "still resolving," not "flagged as wrong," so it should not look like a disputed transaction). No gradients, no stock photography (the homepage's one exception is scoped separately in 7.1), no icon without a text label. Screens: **public homepage** (7.1), price-transparency card (two component cards, not merged), payment entry (M-Pesa "Pay [amount]" button plus a "Cash" option that creates the transaction directly and moves to a waiting-for-confirmation state), confirmation (for cash, shows the honest `cash_unconfirmed`/`cash_confirmed` state rather than a premature checkmark, and is where a Case B tourist taps her own confirm), shared producer/driver/coordinator login, producer/driver dashboard (recent-transactions list needs the cash states as a visibly distinct status, plus an inline "Confirm" action on any row awaiting this user's own confirmation), coordinator registration (with the charges-for toggle), coordinator reconciliation (status column includes all three cash states as distinct, visible entries — expired-unconfirmed cash rows are what a coordinator should notice first), dispute-flag action (modal off a table row, not its own screen).
+Inter (UI/words) + IBM Plex Mono (numbers only, tabular-nums). Mobile-first, 420px max-width card-centered, except the coordinator reconciliation view (full width past 768px, plain table, never a chart) and the public homepage (full width, its own layout — see 7.1). Status states: pending / confirmed / failed for M-Pesa, plus `cash_unconfirmed` / `cash_confirmed` / `cash_expired` for cash — render the cash states visibly distinct from the M-Pesa three (an unconfirmed cash sale is "still resolving," not "flagged as wrong," so it should not look like a disputed transaction). No gradients, no stock photography (the homepage's one exception is scoped separately in 7.1), no icon without a text label. Screens: **public homepage** (7.1), price-transparency card (two component cards, not merged), payment entry (M-Pesa "Pay [amount]" button plus a "Cash" option that creates the transaction directly and moves to a waiting-for-confirmation state), confirmation (for cash, shows the honest `cash_unconfirmed`/`cash_confirmed` state rather than a premature checkmark, and is where a Case B tourist taps her own confirm), shared producer/driver/coordinator login, producer/driver dashboard (recent-transactions list needs the cash states as a visibly distinct status, plus an inline "Confirm" action on any row awaiting this user's own confirmation), coordinator registration (with the charges-for toggle), coordinator reconciliation (status column includes all three cash states as distinct, visible entries — expired-unconfirmed cash rows are what a coordinator should notice first), dispute-flag action (modal off a table row, not its own screen), coordinator accounts (rule 17: closure requests with their blockers and Approve/Reject, makers and drivers with Suspend/Unsuspend and overdue reviews flagged, the audit log). The producer/driver dashboard ends with "Close my account" (rule 17).
 
 ## 7.1 Public homepage — content, layout, and photography rule
 

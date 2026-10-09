@@ -31,7 +31,18 @@ TXN_IDS=()
 q() { psql "$DATABASE_URL" -tAc "$1"; }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(d$1 if isinstance(d, dict) else '')" 2>/dev/null; }
 sig() { PYTHONPATH=. .venv/bin/python scripts/sign_link.py --sig "$@"; }
-login() { curl -s -m 60 -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "{\"phone\":\"$1\",\"pin\":\"$2\"}"; }
+# Retries a login that fails outright: this dev network's pooler sometimes stalls a
+# connection past app/db.py's 10s timeout (CLAUDE.md section 2). A refusal (401/403)
+# is returned as is.
+login() {
+  local r i
+  for i in 1 2 3; do
+    r=$(curl -s -m 60 -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "{\"phone\":\"$1\",\"pin\":\"$2\"}")
+    [[ "$r" == *access_token* || "$r" == *detail* && "$r" != *"Internal"* ]] && break
+    sleep 2
+  done
+  echo "$r"
+}
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -42,12 +53,22 @@ recon() { curl -s -m 60 "$BASE_URL/admin/reconciliation" -H "Authorization: Bear
 add() { python3 -c "from decimal import Decimal as D; import sys; print(sum(D(a) for a in sys.argv[1:]))" "$@"; }
 
 # A simulated M-Pesa sale: created as STK initiate would, then confirmed by a
-# simulated Daraja callback to the real endpoint. Prints the transaction id.
+# simulated Daraja callback to the real endpoint. Prints the transaction id. Retries
+# a step that fails outright (this dev network's pooler stalls now and then) and
+# stops the run if the sale still can't be made, rather than testing without it.
 mpesa_sale() {
-  local sale crid id
-  sale=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$@")
-  id=$(echo "$sale" | json "['id']"); crid=$(echo "$sale" | json "['checkout_request_id']")
-  stk_callback "$crid" "SIM${id:0:8}" >/dev/null
+  local sale="" id="" crid i
+  for i in 1 2 3; do
+    sale=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$@" 2>/dev/null)
+    id=$(echo "$sale" | json "['id']")
+    [ -n "$id" ] && break
+  done
+  [ -n "$id" ] || { echo "FATAL: could not create a simulated M-Pesa sale" >&2; exit 1; }
+  crid=$(echo "$sale" | json "['checkout_request_id']")
+  for i in 1 2 3; do
+    stk_callback "$crid" "SIM${id:0:8}" >/dev/null
+    [ "$(q "select status from transactions where id = '$id';")" = "confirmed" ] && break
+  done
   echo "$id"
 }
 stk_callback() {
@@ -70,7 +91,7 @@ cleanup() {
   echo
   echo "== Cleanup: this run's ledger entries, debts, transactions and withdrawals =="
   local ids="" t
-  for t in "${TXN_IDS[@]}"; do ids="$ids,'$t'"; done
+  for t in "${TXN_IDS[@]}"; do [ -n "$t" ] && ids="$ids,'$t'"; done
   ids="${ids#,}"
   [ -z "$ids" ] && { echo "nothing to clean"; return; }
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
@@ -127,7 +148,7 @@ check "Case B opens no debt" "$(q "select count(*) from cash_debts where transac
 
 echo
 echo "== Test 3: the debt settles once the maker earns by M-Pesa (product 100, no driver) =="
-M1_ID=$(mpesa_sale "$PRODUCER_ID" 100 -); TXN_IDS+=("$M1_ID")
+M1_ID=$(mpesa_sale "$PRODUCER_ID" 100 -) || exit 1; TXN_IDS+=("$M1_ID")
 check "simulated callback confirmed the M-Pesa sale" "$(q "select status from transactions where id = '$M1_ID';")" "confirmed"
 check "the debt is settled" "$(q "select status from cash_debts where transaction_id = '$T1_ID';")" "settled"
 check "the maker's 100 entry was transferred" "$(q "select status from wallet_ledger_entries where transaction_id = '$M1_ID' and settlement_id is not null and amount = 100;")" "transferred"

@@ -52,3 +52,12 @@ payable), and the driver's share a `cash_debts` row the maker owes, settled from
 their M-Pesa-sourced balance (entries marked `transferred`, new entries for the
 driver and the maker's change). Exercised by `scripts/verify_stage4.sh` (no Daraja
 calls) and `scripts/verify_stage6.sh` (real sandbox B2C, simulated M-Pesa funding).
+
+0011 adds account closure and suspension (CLAUDE.md rule 17): `account_status` on
+producers and drivers (`active` becomes a generated column derived from it, so every
+existing "is it active" check now also refuses suspended, closing and closed
+accounts), `closure_requests`, `account_suspensions`, and `account_audit_log`, which
+triggers make append-only for every role, the API's own connection included.
+Exercised by `scripts/verify_lifecycle.sh` (simulated M-Pesa funding, real sandbox
+B2C for two final payouts). Each run leaves its audit entries behind, reasons
+prefixed "[test]": they can't be deleted, by design.

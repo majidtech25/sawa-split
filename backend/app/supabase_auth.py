@@ -74,3 +74,17 @@ async def get_user_from_token(access_token: str) -> dict[str, Any]:
     if resp.status_code >= 400:
         raise SupabaseAuthError(resp.status_code, resp.json())
     return resp.json()
+
+
+async def set_banned(auth_user_id: str, banned: bool) -> None:
+    """Bans (or unbans) a login in Supabase Auth, so a closed account's existing
+    session can't be refreshed either. Login itself is already refused by
+    POST /auth/login; this is the second layer."""
+    async with httpx.AsyncClient(base_url=settings.supabase_url) as client:
+        resp = await client.put(
+            f"/auth/v1/admin/users/{auth_user_id}",
+            headers=_headers(),
+            json={"ban_duration": "876000h" if banned else "none"},
+        )
+    if resp.status_code >= 400:
+        raise SupabaseAuthError(resp.status_code, resp.json())

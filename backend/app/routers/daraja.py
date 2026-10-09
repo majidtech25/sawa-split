@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import payouts
+from .. import lifecycle, payouts
 from ..db import get_session
 from ..ledger import settle_debts, write_ledger_entries
 
@@ -140,6 +140,8 @@ async def b2c_callback(
         {"rtype": updated.recipient_type, "rid": updated.recipient_id, "amount": updated.amount},
     )
     await session.commit()
+    # A closing account's final payout (rule 17): now it can be closed.
+    await lifecycle.finish_closure_if_paid_out(session, updated.recipient_type, updated.recipient_id, updated.id)
     return ACK
 
 

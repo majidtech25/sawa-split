@@ -20,13 +20,14 @@
 5. Producer taps Withdraw → `POST /withdrawals/request` → full available balance is queued for B2C payout.
 6. If not manually withdrawn, the daily 18:00 EAT batch sweep processes it automatically.
 7. Producer sees payout confirmation (or, on failure, a "we're retrying" state — funds remain visible as available, never disappear).
+8. **Closing the account (section 7):** at the bottom of the dashboard, **Close my account** opens a short form with the reason required. While the coordinator hasn't decided, the dashboard shows the pending request with **Cancel this request**. If it's rejected, the coordinator's reason is shown and they can ask again. Once approved, it shows "Your account is being closed" until the final payout lands.
 
 ## 3. Driver / Guide — onboarding + ongoing use
 
 1. **Onboarding (coordinator-led):** coordinator creates the Driver record (name, phone, Till) and generates a unique QR code (stored in the `qr-codes` Supabase Storage bucket), printed and laminated for the driver to carry.
 2. Same login pattern as Producer (phone + PIN).
 3. Dashboard mirrors the Producer dashboard, but leads with **referral count and balance** rather than "amount received" — same components, different information hierarchy (per the design system's two-persona rule). Any Case A referred-cash-sale row awaiting the driver's own confirmation (rule 12) carries the same inline **Confirm** action as the Producer dashboard. The driver's share of a confirmed cash sale shows as "owed by makers" until the maker's M-Pesa earnings cover it, then lands in the driver's available balance.
-4. Withdrawal flow identical to Producer's.
+4. Withdrawal flow identical to Producer's, and so is closing the account (section 7).
 
 ## 4. Coordinator / Admin — ongoing operation
 
@@ -35,7 +36,8 @@
 3. **Reconciliation view:** `GET /admin/reconciliation` — M-Pesa collected vs. disbursed vs. still owed. These always sum exactly and match the real M-Pesa account balance, because cash never enters it. Cash recorded and outstanding maker → driver cash debts are shown beside these totals, with a list of the debts. The status column shows `cash_unconfirmed`, `cash_confirmed`, and `cash_expired` as distinct, visible states rather than folding them into "pending" — expired-unconfirmed cash rows are what a coordinator should notice first.
 4. **Dispute handling:** flags a `Transaction` as disputed → its associated `WalletLedgerEntry` rows move to `frozen`, excluded from any withdrawal or batch calculation until the coordinator resolves it.
 5. **Manual payout retry:** if a B2C payout fails twice (one automatic retry already attempted), the coordinator manually retries from this screen.
-6. **Driver commission review (future gate, logic already planned):** when computing a driver's clean-referral streak, only `mpesa` referrals and `cash_confirmed` referrals count — a `cash_expired` referral does not, which is what gives the driver a reason to chase confirmation rather than let it lapse.
+6. **Accounts screen (section 7):** closure requests with Approve/Reject and what's blocking each one; every maker and driver with Suspend/Unsuspend, suspension reasons and overdue reviews flagged; the audit log.
+7. **Driver commission review (future gate, logic already planned):** when computing a driver's clean-referral streak, only `mpesa` referrals and `cash_confirmed` referrals count — a `cash_expired` referral does not, which is what gives the driver a reason to chase confirmation rather than let it lapse.
 
 ## 5. Cash flow — dual confirmation
 
@@ -56,8 +58,34 @@ Note: `SyncQueueItem` (`sync_queue_items`) is unrelated to cash tracking and rem
 
 ## 6. Cross-cutting rules referenced by every flow above
 
-- No transaction can be initiated against an unregistered driver QR or an inactive producer — rejected at scan time with a plain error.
+- No transaction can be initiated against an unregistered driver QR or an inactive producer — rejected at scan time with a plain error. "Inactive" includes suspended, closing and closed accounts (section 7).
 - Every Daraja webhook (STK or B2C) is idempotent on its reference — a redelivered callback never double-credits or double-pays.
 - Withdrawals are always full-balance, never partial, and only of M-Pesa-sourced money: a maker's payable balance is their available balance minus what they owe drivers from cash sales.
 - B2C never pays out more than M-Pesa collected: every payout is checked first, and refused with a critical log if it would.
 - A `cash_unconfirmed` transaction expires to `cash_expired` at its `confirmation_deadline` if not confirmed by both required parties — no ledger entries are ever written for an expired cash transaction, and it is never deleted or silently retried.
+
+## 7. Account closure and suspension (CLAUDE.md rule 17, added 2026-10-09)
+
+Accounts are closed or suspended, never deleted. All transactions and ledger history always stay.
+
+1. **Request:** the maker or driver taps **Close my account** on their dashboard and gives a reason (required) → `POST /accounts/me/closure`. One open request at a time. They can cancel it while it's pending → `POST /accounts/me/closure/cancel`.
+2. **Review:** the coordinator's Accounts screen lists the request with what its final payout would be and anything blocking approval:
+   - a cash sale awaiting confirmation;
+   - an open dispute;
+   - a payout in progress, or a failed one awaiting a retry;
+   - an unsettled cash debt (owed by this maker, or owed to this driver);
+   - an active suspension.
+
+   Approve is disabled while any of these remain. A debt the maker can already cover is settled first, so it doesn't block.
+3. **Reject:** the reason is required, and the maker or driver sees it on their dashboard → `POST /admin/closure-requests/:id/reject`.
+4. **Approve** → `POST /admin/closure-requests/:id/approve`:
+   - The account becomes `closing`: no new sales (checkout, initiate and the driver QR page all refuse it), though login still works so they can follow the payout.
+   - Their remaining payable balance (M-Pesa-sourced, minus debts) goes out by B2C, even below KES 500.
+   - When that payout succeeds, the account is `closed`. If there's nothing to pay, it closes at once.
+   - If the payout fails, the account stays `closing`, with one automatic retry and then the coordinator's manual retry from Reconciliation.
+5. **Closed:** login is refused ("This account is closed"), and their price cards and QR stop working (the driver page says "This isn't a registered Sawa Split driver").
+6. **Suspend:** the coordinator can suspend any active maker or driver without a request → `POST /admin/accounts/:type/:id/suspend`, with a reason (required) and a review date (default 7 days). Past that date the Accounts screen flags the review as overdue.
+   - A suspension blocks new sales and login. The suspended person sees the reason at login, and on any session already open.
+   - Money earned honestly stays owed and is still paid by the normal rules, including the 18:00 sweep. Only disputed sales stay frozen until resolved.
+   - **Unsuspend** needs a reason → `POST /admin/accounts/:type/:id/unsuspend`.
+7. **Audit log:** every request, cancel, approve, reject, closure, suspend and unsuspend is recorded with who, when and why. The coordinator reads it on the Accounts screen. Nobody can edit or delete an entry.

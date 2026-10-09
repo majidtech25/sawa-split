@@ -6,6 +6,7 @@ import { CheckoutPage, PriceCardPage } from "./pages/PayPage"
 import DriverPage from "./pages/DriverPage"
 import DashboardPage from "./pages/DashboardPage"
 import ReceiptPage from "./pages/ReceiptPage"
+import AccountsPage from "./pages/AccountsPage"
 import CoordinatorPage from "./pages/CoordinatorPage"
 import PriceCardsPage from "./pages/PriceCardsPage"
 import RegisterPage from "./pages/RegisterPage"
@@ -83,6 +84,9 @@ function CoordinatorNav() {
       <NavLink to="/coordinator/price-cards" className={navLink}>
         Price cards
       </NavLink>
+      <NavLink to="/coordinator/accounts" className={navLink}>
+        Accounts
+      </NavLink>
     </nav>
   )
 }
@@ -143,6 +147,7 @@ export default function App() {
         <Route path="/coordinator" element={<CoordinatorScreen><CoordinatorPage /></CoordinatorScreen>} />
         <Route path="/coordinator/register" element={<CoordinatorScreen><RegisterPage /></CoordinatorScreen>} />
         <Route path="/coordinator/price-cards" element={<CoordinatorScreen><PriceCardsPage /></CoordinatorScreen>} />
+        <Route path="/coordinator/accounts" element={<CoordinatorScreen><AccountsPage /></CoordinatorScreen>} />
       </Routes>
     </HashRouter>
   )

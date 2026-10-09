@@ -10,7 +10,7 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import daraja, links, supabase_auth
+from .. import daraja, lifecycle, links, supabase_auth
 from ..caller import normalize_phone
 from ..config import settings
 from ..db import get_session
@@ -291,20 +291,27 @@ async def confirm_cash(
         caller_phone = normalize_phone(user.get("phone") or "")
 
         producer = (
-            await session.execute(text("select phone from producers where id = :id"), {"id": row.producer_id})
+            await session.execute(
+                text("select id, phone, account_status from producers where id = :id"), {"id": row.producer_id}
+            )
         ).one_or_none()
         driver = None
         if row.driver_id is not None:
             driver = (
-                await session.execute(text("select phone from drivers where id = :id"), {"id": row.driver_id})
+                await session.execute(
+                    text("select id, phone, account_status from drivers where id = :id"), {"id": row.driver_id}
+                )
             ).one_or_none()
 
         if producer is not None and normalize_phone(producer.phone) == caller_phone:
-            role = "maker"
+            role, me = "maker", producer
         elif driver is not None and normalize_phone(driver.phone) == caller_phone:
-            role = "driver"
+            role, me = "driver", driver
         else:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a party to this transaction")
+        refusal = await lifecycle.login_refusal(session, role, me.id, me.account_status)
+        if refusal:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, refusal)
     elif body.tourist_token is not None:
         if row.driver_id is not None:
             raise HTTPException(

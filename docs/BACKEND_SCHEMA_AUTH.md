@@ -2,7 +2,7 @@
 
 **Status:** Locked. Full rules and lifecycle states are in the published Rulebook artifact; this file is the schema + auth sequence Claude Code builds directly from.
 
-## 1. Schema — six tables, plus `cash_debts` (2026-10-09)
+## 1. Schema — six tables, plus `cash_debts` and the account lifecycle tables (2026-10-09)
 
 ```sql
 -- producers
@@ -14,7 +14,8 @@ site          text,
 default_split_driver_pct  numeric not null check (default_split_driver_pct <= 40), -- maker floor: 60%, applies to the product component only
 charges_product  boolean not null default true,
 charges_photo    boolean not null default false,
-active        boolean not null default true,
+account_status text not null default 'active' check (account_status in ('active','suspended','closing','closed')), -- CLAUDE.md rule 17
+active        boolean generated always as (account_status = 'active') stored,  -- derived; every "is it active" check reads this
 created_at    timestamptz not null default now(),
 constraint producers_at_least_one_component check (charges_product or charges_photo)
 
@@ -24,7 +25,8 @@ name          text not null,
 phone         text unique not null,
 till          text not null,
 qr_code       text unique not null,
-active        boolean not null default true,
+account_status text not null default 'active' check (account_status in ('active','suspended','closing','closed')),
+active        boolean generated always as (account_status = 'active') stored,
 created_at    timestamptz not null default now()
 
 -- transactions
@@ -93,6 +95,40 @@ status            text not null check (status in ('requested','processing','paid
 requested_at      timestamptz not null default now(),
 resolved_at       timestamptz
 
+-- closure_requests   (migration 0011, CLAUDE.md rule 17)
+id              uuid primary key default gen_random_uuid(),
+party_type      text not null check (party_type in ('maker','driver')),  -- as recipient_type
+party_id        uuid not null,
+reason          text not null,             -- required, non-blank
+status          text not null default 'pending' check (status in ('pending','cancelled','rejected','approved','closed')),
+requested_at    timestamptz not null default now(),
+decided_at      timestamptz,
+decided_by      uuid,                      -- coordinator's auth user id
+decision_reason text,                      -- required when rejected
+closed_at       timestamptz
+-- unique (party_type, party_id) where status in ('pending','approved')
+
+-- account_suspensions   (migration 0011)
+id           uuid primary key default gen_random_uuid(),
+party_type   text not null check (party_type in ('maker','driver')),
+party_id     uuid not null,
+reason       text not null,                -- shown to the suspended person
+review_on    date not null,                -- default 7 days; past it, flagged overdue
+suspended_by uuid not null,
+suspended_at timestamptz not null default now(),
+lifted_at    timestamptz, lifted_by uuid, lift_reason text
+-- unique (party_type, party_id) where lifted_at is null
+
+-- account_audit_log   (migration 0011: append-only, triggers refuse UPDATE, DELETE and TRUNCATE for every role)
+id          bigint generated always as identity primary key,
+at          timestamptz not null default now(),
+action      text not null,                 -- closure_requested/_cancelled/_approved/_rejected, account_closed, suspended, unsuspended
+party_type  text not null, party_id uuid not null,
+actor_role  text not null,                 -- maker, driver, coordinator, system
+actor_id    uuid, actor_phone text,
+reason      text,
+details     jsonb not null default '{}'
+
 -- sync_queue_items   (true offline/no-connectivity capture — a still-unbuilt future concern,
 -- distinct from cash-payment tracking, which now lives directly in `transactions` above via
 -- payment_method + the cash_* statuses. Do not repurpose this table for cash — it's for the
@@ -112,8 +148,8 @@ One Supabase Storage bucket, `qr-codes` — public read, coordinator-only write.
 | Role | producers/drivers | transactions | wallet_ledger_entries | withdrawal_requests | admin actions |
 |---|---|---|---|---|---|
 | Tourist (anonymous) | — | create (via pay endpoint only) + confirm own cash txn (token-scoped) | — | — | — |
-| Producer/Driver | read own | read own + confirm own cash txn | read own (and own `cash_debts`, owed or owed to) | create/read own | — |
-| Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration |
+| Producer/Driver | read own | read own + confirm own cash txn | read own (and own `cash_debts`, owed or owed to) | create/read own | request/cancel/read own closure |
+| Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration, closure approve/reject, suspend/unsuspend, read audit log |
 
 Enforced twice: Supabase RLS at the data layer, FastAPI endpoint checks at the API layer. A client can display its own balance; it can never write to it directly — only the FastAPI service, using the service-role key, writes to money-affecting tables.
 
@@ -129,6 +165,7 @@ No public self-registration for any role. Accounts are created by the coordinato
 4. **Coordinator/Admin login** — same Supabase Auth mechanism, but the account carries an `is_admin` claim, unlocking the reconciliation, registration, and dispute-resolution endpoints (checked at both the RLS and FastAPI layers).
 5. **Tourist** — no account, no session. The public pay endpoint is the only surface a tourist ever touches, and it's rate-limited per phone number rather than gated by login. A Case B walk-up cash sale (no driver referral) needs her own confirmation too (CLAUDE.md section 4 rule 12) — that also needs no login: a short-lived signed token tied to the transaction id, delivered via whatever already shows her the payment-confirmation screen (an in-page "I paid" button if she's still there, or an SMS link if not). Do not require Supabase Auth for this — it would contradict "no account for tourists."
 6. **Cash confirmation taps for Producer/Driver** — a Case A referred cash sale needs both the driver's and the maker's confirmation, a Case B walk-up sale needs the maker's alongside the tourist's; both happen from the producer's/driver's already-authenticated dashboard session, via the same login as step 2.
+7. **Suspended or closed accounts (CLAUDE.md rule 17):** `POST /auth/login` checks `account_status` after the PIN (so a wrong PIN learns nothing). A suspended account is refused with its reason and review date; a closed one with "This account is closed". Every authenticated producer/driver API call, the cash confirm included, is refused the same way, so a session opened before a suspension sees the reason too. A closed account is also banned in Supabase Auth (`ban_duration`), so its session can't refresh. A suspension isn't banned there, so an open session still shows the reason rather than a bare token error. A `closing` account can still log in to follow its final payout.
 
 ## 5. Money-movement sequence (STK/cash → ledger → payout)
 
