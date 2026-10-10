@@ -1,76 +1,28 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import lifecycle, payouts
+from .. import lifecycle, payouts, verification
 from ..db import get_session
-from ..ledger import settle_debts, write_ledger_entries
 
 router = APIRouter(prefix="/daraja", tags=["daraja"], include_in_schema=False)
 
 ACK = {"ResultCode": 0, "ResultDesc": "Accepted"}
 
 
-@router.post("/stk-callback")
-async def stk_callback(payload: dict[str, Any], session: Annotated[AsyncSession, Depends(get_session)]) -> dict:
-    """Real Daraja STK callback (CLAUDE.md section 6 step 2), replacing stage 4's
-    coordinator-triggered fake-confirm. Always acks 200 so Daraja doesn't retry
-    forever — our own idempotency guard (status = 'initiated' in the UPDATE) is what
-    actually protects against a redelivered callback double-crediting (rule 7),
-    proven first in stage 4's fake-confirm/cash-confirm paths."""
-    stk = payload.get("Body", {}).get("stkCallback", {})
-    checkout_request_id = stk.get("CheckoutRequestID")
-    result_code = stk.get("ResultCode")
-
-    row = (
-        await session.execute(
-            text("select * from transactions where checkout_request_id = :crid"), {"crid": checkout_request_id}
-        )
-    ).one_or_none()
-    if row is None or row.status != "initiated":
-        return ACK  # unknown reference, or already handled — idempotent no-op either way
-
-    if str(result_code) != "0":
-        # Rule 6: failed/timed-out STK — no ledger entry, no auto-retry.
-        await session.execute(
-            text("update transactions set status = 'failed' where id = :id and status = 'initiated'"),
-            {"id": row.id},
-        )
-        await session.commit()
-        return ACK
-
-    items = {item["Name"]: item["Value"] for item in stk.get("CallbackMetadata", {}).get("Item", [])}
-    receipt = items.get("MpesaReceiptNumber")
-
-    updated = (
-        await session.execute(
-            text(
-                "update transactions set status = 'confirmed', stk_receipt = :receipt "
-                "where id = :id and status = 'initiated' returning *"
-            ),
-            {"receipt": receipt, "id": row.id},
-        )
-    ).one_or_none()
-    if updated is None:
-        await session.commit()
-        return ACK  # a redelivered callback lost the race — already handled
-
-    await write_ledger_entries(
-        session,
-        transaction_id=updated.id,
-        producer_id=updated.producer_id,
-        driver_id=updated.driver_id,
-        maker_amount=updated.maker_amount,
-        driver_amount=updated.driver_amount,
-    )
-    await session.commit()
-    # New M-Pesa earnings may now cover a debt this maker owes a driver from a cash
-    # sale (rule 12): settle it as soon as they do.
-    await settle_debts(session, updated.producer_id)
-    await session.commit()
-    return ACK
+@router.post("/stk-callback/{token}")
+async def stk_callback(
+    token: str, payload: dict[str, Any], session: Annotated[AsyncSession, Depends(get_session)]
+) -> JSONResponse:
+    """Real Daraja STK callback (CLAUDE.md section 6 step 2), at the per-transaction
+    signed URL the STK Push gave Daraja. A callback without this sale's token, or for a
+    different amount, is refused and credits nothing; app/verification.py then has
+    Safaricom confirm the payment (STK_QUERY_MODE). Redelivery is a no-op (rule 7)."""
+    code, body = await verification.handle_stk_callback(session, token, payload)
+    return JSONResponse(body, status_code=code)
 
 
 @router.post("/b2c-callback")

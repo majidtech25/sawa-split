@@ -47,13 +47,30 @@ total_amount          numeric not null check (total_amount > 0),  -- product_amo
 maker_amount          numeric not null,     -- product_maker_amount + photo_amount
 driver_amount         numeric not null default 0,  -- product_driver_amount only — photo never contributes here
 stk_receipt           text unique,          -- mpesa only, null for cash
-status                text not null check (status in ('initiated','confirmed','failed','disputed','cash_unconfirmed','cash_confirmed','cash_expired')),
+status                text not null check (status in ('initiated','verifying','confirmed','failed','disputed','cash_unconfirmed','cash_confirmed','cash_expired')),
+                                            -- 'verifying': STK_QUERY_MODE=enforce, waiting for Safaricom's confirmation; nobody credited
 driver_confirmed_at   timestamptz,          -- cash Case A (driver_id set): driver's confirm tap
 maker_confirmed_at    timestamptz,          -- cash Case A and Case B: maker's confirm tap
 tourist_confirmed_at  timestamptz,          -- cash Case B (no driver_id): tourist's confirm tap
 confirmation_deadline timestamptz,          -- cash only: created_at + CASH_CONFIRM_WINDOW_MINUTES (default 10)
 created_at            timestamptz not null default now(),
 constraint transactions_at_least_one_component check (product_enabled or photo_enabled)
+
+-- transaction_secrets   (migration 0012: no browser role can read it, not streamed by Realtime)
+transaction_id        uuid primary key references transactions(id) on delete cascade,
+checkout_request_id   text unique,          -- mpesa: Daraja's STK Push id, matched by the callback
+tourist_confirm_token text unique           -- cash Case B: the tourist's confirmation token
+
+-- stk_verifications   (migration 0012: STK Push Query check of each successful STK callback)
+transaction_id  uuid primary key references transactions(id) on delete cascade,
+mode            text not null,              -- 'flag' or 'enforce' (STK_QUERY_MODE when the callback arrived)
+state           text not null default 'pending',  -- pending, verified, mismatch, unanswered, amount_mismatch
+attempts        int not null default 0,
+next_check_at   timestamptz not null default now(),
+callback_amount numeric,
+last_result     jsonb,
+created_at      timestamptz not null default now(),
+updated_at      timestamptz not null default now()
 
 -- wallet_ledger_entries   (append-only — balances are computed, never stored directly; amounts never change)
 -- Only M-Pesa money is ever payable (CLAUDE.md rule 12). An M-Pesa sale writes the maker's and
@@ -145,15 +162,18 @@ One Supabase Storage bucket, `qr-codes` — public read, coordinator-only write.
 
 ## 3. Row Level Security — permission matrix
 
-| Role | producers/drivers | transactions | wallet_ledger_entries | withdrawal_requests | admin actions |
-|---|---|---|---|---|---|
-| Tourist (anonymous) | — | create (via pay endpoint only) + confirm own cash txn (token-scoped) | — | — | — |
-| Producer/Driver | read own | read own + confirm own cash txn | read own (and own `cash_debts`, owed or owed to) | create/read own | request/cancel/read own closure |
-| Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration, closure approve/reject, suspend/unsuspend, read audit log |
+Every browser role (`anon`, `authenticated`) holds SELECT and nothing else on every table, and there are no write policies at all *(migration 0012, 2026-10-09)*. **No browser writes the database, for any role: maker, driver, coordinator or tourist.** Every change goes through a FastAPI endpoint, which checks the caller and writes with its own direct connection. That connection is the only writer, and the Secret key never reaches the frontend. Default privileges keep future tables the same. `checkout_request_id` and `tourist_confirm_token` live in `transaction_secrets`, which no browser role can read and Realtime doesn't stream; `auth_credentials` is unreadable too. `scripts/verify_security.sh` proves all of it.
 
-Enforced twice: Supabase RLS at the data layer, FastAPI endpoint checks at the API layer. A client can display its own balance; it can never write to it directly — only the FastAPI service, using the service-role key, writes to money-affecting tables.
+**Browser** is a direct read through Supabase with the Publishable key; **API** is a FastAPI endpoint:
 
-The tourist's cash-confirmation right above is scoped by a short-lived signed token tied to the transaction id, not by an account — she has none. Producer/Driver's cash-confirmation right is exercised from their authenticated dashboard session, same as any other read/write of their own rows.
+| Role | producers/drivers | transactions | wallet_ledger_entries, cash_debts | withdrawal_requests | closure_requests, suspensions, audit log | transaction_secrets, auth_credentials |
+|---|---|---|---|---|---|---|
+| Tourist (anonymous) | — | API: create (pay endpoint), confirm own Case B cash sale (token) | — | — | — | — |
+| Producer/Driver | browser: read own. Never write (status, split, phone, Till: coordinator only) | browser: read own. API: confirm own cash sale | browser: read own | browser: read own. API: withdraw | browser: read own closure requests. API: request/cancel own closure | — |
+| Coordinator | browser: read all. API: register | browser: read all. API: dispute/resolve, check payment | browser: read all | browser: read all. API: manual retry | browser: read all. API: approve/reject, suspend/unsuspend | — |
+| Anyone, browser | no writes on any table, ever | | | | | no reads either |
+
+The tourist's cash-confirmation right above is scoped by a short-lived signed token tied to the transaction id, not by an account — she has none. Producer/Driver's cash-confirmation right is exercised through the API from their authenticated dashboard session.
 
 ## 4. Authentication flow
 
@@ -170,7 +190,9 @@ No public self-registration for any role. Accounts are created by the coordinato
 ## 5. Money-movement sequence (STK/cash → ledger → payout)
 
 1. `POST /transactions/initiate` — for `payment_method: mpesa`, STK Push fires. For `payment_method: cash`, no Daraja call — the transaction is created directly in `cash_unconfirmed` status with `confirmation_deadline` set (`created_at + CASH_CONFIRM_WINDOW_MINUTES`).
-2. **M-Pesa path:** `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` `wallet_ledger_entries` for maker (product_maker_amount + photo_amount, whichever are enabled) and, only if `product_enabled`, for the driver.
+2. **M-Pesa path:** `POST /daraja/stk-callback/{token}`, the per-transaction URL the STK Push gave Daraja (token = HMAC of the transaction id, `app/links.py`). A missing or wrong token is refused (403), and so is an `Amount` other than the whole-shilling total the STK Push asked for (400, flagged). Otherwise, checking the transaction reference idempotently, `STK_QUERY_MODE` decides (`app/verification.py`):
+   - **`flag`** (default; sandbox and demo): write `pending` `wallet_ledger_entries` for maker (product_maker_amount + photo_amount, whichever are enabled) and, only if `product_enabled`, for the driver; then confirm with Safaricom by STK Push Query in the background, flagging a "not paid" or unanswered result to the coordinator.
+   - **`enforce`** (**required in production**): mark the sale `verifying` and write nothing until the query confirms it. A "no" fails it; no answer leaves it verifying, flagged, with "Check again" for the coordinator.
 2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` is called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B), and sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed`. Then the maker's share is written as `cash_held` (never payable), and the driver's share, if any, opens a `cash_debts` row. That debt is settled from the maker's available M-Pesa-sourced entries at once if they cover it, otherwise as soon as they do. Cash itself never reaches steps 4–5. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and nothing is written for that transaction.
 3. Balance becomes `available` once cleared for payout eligibility. After every STK credit, the maker's outstanding cash debts are settled if the new balance covers them.
 4. `POST /withdrawals/request` (on-demand, full payable balance, ≥ KES 500) **or** the 18:00 EAT APScheduler batch sweep (which settles cash debts first). Either path creates a `withdrawal_requests` row with a generated idempotency key and triggers Daraja B2C. Payable is the available M-Pesa-sourced balance, minus (for a maker) debts still owed to drivers. Before every B2C call, the API refuses with a critical log (`PayoutCapExceeded`) if everything paid or being paid, plus this payout, would exceed M-Pesa collected, or if this payout exceeds the recipient's own available entries.

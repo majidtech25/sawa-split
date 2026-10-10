@@ -35,3 +35,20 @@ def is_valid(signature: str | None, producer_id: str, product, photo, driver_qr:
     if not signature:
         return False
     return hmac.compare_digest(signature, sign(producer_id, product, photo, driver_qr))
+
+
+# --- Signed STK callback URLs ------------------------------------------------------------
+#
+# Each STK Push gets its own callback URL, /daraja/stk-callback/<token>, where the token
+# is an HMAC of the transaction id. Daraja calls back exactly the URL it was given; a
+# forged callback can't, because the token isn't stored anywhere a browser can read and
+# can't be derived without the API's secret. Keyed with CHECKOUT_LINK_SECRET under its
+# own label, so it never collides with a price-card signature.
+
+def callback_token(transaction_id) -> str:
+    message = f"stk-callback|v1|{str(transaction_id).lower()}".encode()
+    return hmac.new(settings.checkout_link_secret.encode(), message, hashlib.sha256).hexdigest()
+
+
+def callback_token_valid(token: str | None, transaction_id) -> bool:
+    return bool(token) and hmac.compare_digest(token, callback_token(transaction_id))

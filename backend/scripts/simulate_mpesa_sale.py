@@ -1,10 +1,15 @@
 """Creates an M-Pesa sale exactly as POST /transactions/initiate would, but without the
 STK Push: no Daraja call, no prompt to anyone's phone, no money. The caller then
-delivers a simulated Daraja callback to POST /daraja/stk-callback, so the real
+delivers a simulated Daraja callback to the real callback endpoint, so the real
 callback, ledger and settlement code runs (CLAUDE.md section 2.1: a sandbox STK Push
 to a real number charges real money, so test scripts fund balances this way).
 
-Prints one JSON line: {"id", "checkout_request_id", "total_amount", "maker_amount", "driver_amount"}.
+The callback must go to /daraja/stk-callback/<callback_token> with Amount equal to
+total_amount, exactly as Daraja would be told to (app/links.py, app/verification.py).
+Safaricom's STK Push Query then says this sale doesn't exist, as it never went through
+M-Pesa: with STK_QUERY_MODE=flag it stays credited and is flagged as a mismatch.
+
+Prints one JSON line: {"id", "checkout_request_id", "callback_token", "total_amount", "maker_amount", "driver_amount"}.
 
 Usage (from backend/, .env loaded):
   PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py <producer_id> <product|-> <photo|-> [driver_id]
@@ -18,6 +23,7 @@ from decimal import Decimal
 
 from sqlalchemy import text
 
+from app import links
 from app.db import async_session
 from app.ledger import compute_split
 
@@ -38,11 +44,11 @@ async def main(producer_id: str, product: Decimal | None, photo: Decimal | None,
                     insert into transactions
                         (producer_id, driver_id, payment_method, product_enabled, product_amount,
                          product_maker_amount, product_driver_amount, photo_enabled, photo_amount,
-                         total_amount, maker_amount, driver_amount, status, checkout_request_id)
+                         total_amount, maker_amount, driver_amount, status)
                     values
                         (:producer_id, :driver_id, 'mpesa', :product_enabled, :product_amount,
                          :product_maker_amount, :product_driver_amount, :photo_enabled, :photo_amount,
-                         :total_amount, :maker_amount, :driver_amount, 'initiated', :crid)
+                         :total_amount, :maker_amount, :driver_amount, 'initiated')
                     returning id
                     """
                 ),
@@ -58,16 +64,20 @@ async def main(producer_id: str, product: Decimal | None, photo: Decimal | None,
                     "total_amount": split["total_amount"],
                     "maker_amount": split["maker_amount"],
                     "driver_amount": split["driver_amount"],
-                    "crid": checkout_request_id,
                 },
             )
         ).one()
+        await session.execute(
+            text("insert into transaction_secrets (transaction_id, checkout_request_id) values (:id, :crid)"),
+            {"id": row.id, "crid": checkout_request_id},
+        )
         await session.commit()
     print(
         json.dumps(
             {
                 "id": str(row.id),
                 "checkout_request_id": checkout_request_id,
+                "callback_token": links.callback_token(row.id),
                 "total_amount": str(split["total_amount"]),
                 "maker_amount": str(split["maker_amount"]),
                 "driver_amount": str(split["driver_amount"]),

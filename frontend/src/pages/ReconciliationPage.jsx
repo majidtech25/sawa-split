@@ -37,6 +37,95 @@ function Td({ children, right = false, mono = false, className = "", colSpan }) 
   )
 }
 
+const CHECK_LABEL = {
+  pending: "Waiting for Safaricom",
+  mismatch: "Safaricom says not paid",
+  unanswered: "Safaricom never answered",
+  amount_mismatch: "Callback amount was wrong",
+}
+
+// What each flagged check means for the money, in a coordinator's terms.
+function checkMeaning(c) {
+  if (c.state === "amount_mismatch") return "The callback was refused and nobody was credited."
+  if (c.transaction_status === "verifying") return "Nobody is credited until Safaricom confirms it."
+  if (c.state === "mismatch" && c.transaction_status === "failed") return "Marked failed. Nobody was credited."
+  if (c.state === "mismatch") return "Already credited (flag mode). Flag a dispute to hold the shares."
+  return "Credited (flag mode). Check again, or flag a dispute to hold the shares."
+}
+
+function PaymentChecks({ checks, reload }) {
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState(null)
+  async function checkAgain(id) {
+    setBusy(id)
+    setError(null)
+    try {
+      await api(`/admin/transactions/${id}/check-payment`, { method: "POST", auth: true })
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+  return (
+    <section className="mt-8">
+      <h2 className="text-lg font-semibold">Payment checks</h2>
+      <p className="mt-1 text-sm text-sawa-text-muted">
+        Every M-Pesa callback is confirmed with Safaricom (STK Push Query). These ones need a look.
+      </p>
+      <div className="mt-2">
+        <ErrorNote>{error}</ErrorNote>
+      </div>
+      <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
+        <table className="w-full min-w-[760px] border-collapse">
+          <thead>
+            <tr>
+              <Th>When (EAT)</Th>
+              <Th>Maker</Th>
+              <Th right>Total</Th>
+              <Th>Check</Th>
+              <Th>What it means</Th>
+              <Th>
+                <span className="sr-only">Action</span>
+              </Th>
+            </tr>
+          </thead>
+          <tbody>
+            {checks.map((c) => (
+              <tr key={c.transaction_id}>
+                <Td mono>{eatDateTime(c.created_at)}</Td>
+                <Td>{c.producer_name}</Td>
+                <Td right mono>{ksh(c.total_amount)}</Td>
+                <Td>
+                  <span className="font-semibold">{CHECK_LABEL[c.state] || c.state}</span>
+                  {c.last_result && <div className="mt-0.5 text-xs text-sawa-text-muted">{c.last_result}</div>}
+                  {c.state === "amount_mismatch" && c.callback_amount != null && (
+                    <div className="mt-0.5 text-xs text-sawa-text-muted">Callback said {ksh(c.callback_amount)}</div>
+                  )}
+                </Td>
+                <Td className="text-sawa-text-muted">{checkMeaning(c)}</Td>
+                <Td right>
+                  {c.state !== "amount_mismatch" && c.transaction_status !== "failed" && (
+                    <button
+                      type="button"
+                      onClick={() => checkAgain(c.transaction_id)}
+                      disabled={busy === c.transaction_id}
+                      className="whitespace-nowrap text-sm text-sawa-green underline-offset-2 hover:underline disabled:text-sawa-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+                    >
+                      {busy === c.transaction_id ? "Checking…" : "Check again"}
+                    </button>
+                  )}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function useReconciliation() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
@@ -115,10 +204,12 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
 
           {t.needs_attention > 0 && (
             <p className="mt-2 text-sm font-semibold">
-              {t.needs_attention} {t.needs_attention === 1 ? "item needs" : "items need"} attention: expired cash sales and
-              failed payouts are listed first.
+              {t.needs_attention} {t.needs_attention === 1 ? "item needs" : "items need"} attention: payment checks, expired
+              cash sales and failed payouts are listed first.
             </p>
           )}
+
+          {data.payment_checks.length > 0 && <PaymentChecks checks={data.payment_checks} reload={reload} />}
 
           <section className="mt-8">
             <h2 className="text-lg font-semibold">Transactions</h2>

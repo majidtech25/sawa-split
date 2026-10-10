@@ -47,6 +47,7 @@ login() {
   echo "$r"
 }
 code() { curl -s -o /dev/null -w '%{http_code}' -m 60 "$@"; }
+source scripts/sim_mpesa.sh
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -77,27 +78,6 @@ post_code() {
 me() { curl -s -m 60 "$BASE_URL/accounts/me" -H "Authorization: Bearer $1"; }
 admin_accounts() { curl -s -m 60 "$BASE_URL/admin/accounts" -H "Authorization: Bearer $COORD_TOKEN"; }
 open_request() { q "select id from closure_requests where party_id = '$1' and status in ('pending','approved');"; }
-# A simulated M-Pesa sale: created as STK initiate would, then confirmed by a
-# simulated Daraja callback to the real endpoint. Prints the transaction id. Retries
-# a step that fails outright (this dev network's pooler stalls now and then) and
-# stops the run if the sale still can't be made, rather than testing without it.
-mpesa_sale() {
-  local sale="" id="" crid i
-  for i in 1 2 3; do
-    sale=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$@" 2>/dev/null)
-    id=$(echo "$sale" | json "['id']")
-    [ -n "$id" ] && break
-  done
-  [ -n "$id" ] || { echo "FATAL: could not create a simulated M-Pesa sale" >&2; exit 1; }
-  crid=$(echo "$sale" | json "['checkout_request_id']")
-  for i in 1 2 3; do
-    curl -s -m 60 -X POST "$BASE_URL/daraja/stk-callback" -H "Content-Type: application/json" -d "{
-      \"Body\": {\"stkCallback\": {\"CheckoutRequestID\": \"$crid\", \"ResultCode\": 0, \"CallbackMetadata\": {\"Item\": [
-        {\"Name\": \"MpesaReceiptNumber\", \"Value\": \"SIM${id:0:8}\"}]}}}}" >/dev/null
-    [ "$(q "select status from transactions where id = '$id';")" = "confirmed" ] && break
-  done
-  echo "$id"
-}
 unban() {  # unban <phone>: lift the Supabase Auth ban a closure leaves
   PYTHONPATH=. .venv/bin/python - "$1" <<'PY'
 import asyncio, sys

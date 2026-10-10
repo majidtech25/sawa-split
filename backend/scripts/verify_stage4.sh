@@ -43,6 +43,7 @@ login() {
   done
   echo "$r"
 }
+source scripts/sim_mpesa.sh
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -52,30 +53,6 @@ me() { curl -s -m 60 "$BASE_URL/accounts/me" -H "Authorization: Bearer $1" | jso
 recon() { curl -s -m 60 "$BASE_URL/admin/reconciliation" -H "Authorization: Bearer $COORD_TOKEN" | json "['totals']['$1']"; }
 add() { python3 -c "from decimal import Decimal as D; import sys; print(sum(D(a) for a in sys.argv[1:]))" "$@"; }
 
-# A simulated M-Pesa sale: created as STK initiate would, then confirmed by a
-# simulated Daraja callback to the real endpoint. Prints the transaction id. Retries
-# a step that fails outright (this dev network's pooler stalls now and then) and
-# stops the run if the sale still can't be made, rather than testing without it.
-mpesa_sale() {
-  local sale="" id="" crid i
-  for i in 1 2 3; do
-    sale=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$@" 2>/dev/null)
-    id=$(echo "$sale" | json "['id']")
-    [ -n "$id" ] && break
-  done
-  [ -n "$id" ] || { echo "FATAL: could not create a simulated M-Pesa sale" >&2; exit 1; }
-  crid=$(echo "$sale" | json "['checkout_request_id']")
-  for i in 1 2 3; do
-    stk_callback "$crid" "SIM${id:0:8}" >/dev/null
-    [ "$(q "select status from transactions where id = '$id';")" = "confirmed" ] && break
-  done
-  echo "$id"
-}
-stk_callback() {
-  curl -s -m 60 -X POST "$BASE_URL/daraja/stk-callback" -H "Content-Type: application/json" -d "{
-    \"Body\": {\"stkCallback\": {\"CheckoutRequestID\": \"$1\", \"ResultCode\": 0, \"CallbackMetadata\": {\"Item\": [
-      {\"Name\": \"MpesaReceiptNumber\", \"Value\": \"$2\"}]}}}}"
-}
 cash_sale() {  # cash_sale <product|-> <photo|-> [driver_id driver_qr] -> initiate response
   local driver_part="" product_part photo_part
   [ $# -ge 4 ] && driver_part="\"driver_id\":\"$3\","
@@ -154,8 +131,8 @@ check "the debt is settled" "$(q "select status from cash_debts where transactio
 check "the maker's 100 entry was transferred" "$(q "select status from wallet_ledger_entries where transaction_id = '$M1_ID' and settlement_id is not null and amount = 100;")" "transferred"
 check "driver now has 60 payable, nothing owed" "$(me "$DRIVER_TOKEN" payable) $(me "$DRIVER_TOKEN" owed_by_makers)" "60.00 0"
 check "maker keeps the 40 change" "$(me "$PRODUCER_TOKEN" payable)" "40.00"
-M1_CRID=$(q "select checkout_request_id from transactions where id = '$M1_ID';")
-stk_callback "$M1_CRID" "REPLAYED" >/dev/null
+M1_CRID=$(q "select checkout_request_id from transaction_secrets where transaction_id = '$M1_ID';")
+stk_callback "$(callback_token "$M1_ID")" "$M1_CRID" 100 "REPLAYED" >/dev/null
 check "a redelivered callback credits nothing more (rule 7)" "$(me "$PRODUCER_TOKEN" payable) $(me "$DRIVER_TOKEN" payable)" "40.00 60.00"
 
 echo

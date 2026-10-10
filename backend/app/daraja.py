@@ -77,6 +77,32 @@ async def stk_push(
     return resp.json()
 
 
+async def stk_query(checkout_request_id: str) -> dict[str, Any]:
+    """Asks Daraja how an STK Push actually ended (STK Push Query). Returns the JSON
+    body whatever the HTTP status: an answer comes back as ResultCode, and "not known
+    yet" or "no such transaction" as an errorCode/errorMessage with HTTP 500 (both
+    share errorCode 500.001.1001, so app/verification.py reads the message)."""
+    token = await get_access_token()
+    timestamp = datetime.now(EAT).strftime("%Y%m%d%H%M%S")
+    password = base64.b64encode(
+        f"{settings.daraja_shortcode}{settings.daraja_passkey}{timestamp}".encode()
+    ).decode()
+    body = {
+        "BusinessShortCode": settings.daraja_shortcode,
+        "Password": password,
+        "Timestamp": timestamp,
+        "CheckoutRequestID": checkout_request_id,
+    }
+    async with httpx.AsyncClient(base_url=settings.daraja_base_url, timeout=30) as client:
+        resp = await client.post(
+            "/mpesa/stkpushquery/v1/query", json=body, headers={"Authorization": f"Bearer {token}"}
+        )
+    try:
+        return resp.json()
+    except ValueError:
+        return {"errorCode": f"http-{resp.status_code}", "errorMessage": resp.text[:200]}
+
+
 async def b2c_payment(
     *,
     phone: str,

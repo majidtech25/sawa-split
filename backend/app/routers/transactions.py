@@ -163,13 +163,11 @@ async def initiate_transaction(
                 insert into transactions
                     (producer_id, driver_id, payment_method, product_enabled, product_amount,
                      product_maker_amount, product_driver_amount, photo_enabled, photo_amount,
-                     total_amount, maker_amount, driver_amount, status, confirmation_deadline,
-                     tourist_confirm_token)
+                     total_amount, maker_amount, driver_amount, status, confirmation_deadline)
                 values
                     (:producer_id, :driver_id, :payment_method, :product_enabled, :product_amount,
                      :product_maker_amount, :product_driver_amount, :photo_enabled, :photo_amount,
-                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline,
-                     :tourist_confirm_token)
+                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline)
                 returning id
                 """
             ),
@@ -188,10 +186,14 @@ async def initiate_transaction(
                 "driver_amount": split["driver_amount"],
                 "status": txn_status,
                 "confirmation_deadline": confirmation_deadline,
-                "tourist_confirm_token": tourist_confirm_token,
             },
         )
     ).one()
+    # Secrets live where no browser can read them, not even the maker's (migration 0012).
+    await session.execute(
+        text("insert into transaction_secrets (transaction_id, tourist_confirm_token) values (:id, :token)"),
+        {"id": row.id, "token": tourist_confirm_token},
+    )
     await session.commit()
 
     if body.payment_method == "mpesa":
@@ -204,7 +206,8 @@ async def initiate_transaction(
                 amount=split["total_amount"],
                 account_reference=str(row.id)[:12],
                 transaction_desc="Sawa Split payment",
-                callback_url=f"{settings.daraja_callback_base_url}/daraja/stk-callback",
+                # Signed per transaction, so only Daraja can call it back (app/links.py).
+                callback_url=f"{settings.daraja_callback_base_url}/daraja/stk-callback/{links.callback_token(row.id)}",
             )
             if str(stk_response.get("ResponseCode")) != "0":
                 raise RuntimeError(stk_response.get("ResponseDescription", "STK push rejected"))
@@ -216,7 +219,7 @@ async def initiate_transaction(
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Could not initiate M-Pesa payment: {exc}") from exc
 
         await session.execute(
-            text("update transactions set checkout_request_id = :crid where id = :id"),
+            text("update transaction_secrets set checkout_request_id = :crid where transaction_id = :id"),
             {"crid": stk_response["CheckoutRequestID"], "id": row.id},
         )
         await session.commit()
@@ -318,7 +321,12 @@ async def confirm_cash(
                 status.HTTP_400_BAD_REQUEST,
                 "This transaction has a driver referral (Case A) — tourist confirmation doesn't apply.",
             )
-        if row.tourist_confirm_token != body.tourist_token:
+        stored = (
+            await session.execute(
+                text("select tourist_confirm_token from transaction_secrets where transaction_id = :id"), {"id": row.id}
+            )
+        ).scalar_one_or_none()
+        if not stored or not secrets.compare_digest(stored, body.tourist_token):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid confirmation token")
         role = "tourist"
     else:

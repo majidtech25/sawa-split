@@ -61,3 +61,12 @@ triggers make append-only for every role, the API's own connection included.
 Exercised by `scripts/verify_lifecycle.sh` (simulated M-Pesa funding, real sandbox
 B2C for two final payouts). Each run leaves its audit entries behind, reasons
 prefixed "[test]": they can't be deleted, by design.
+
+0012 is the security lockdown (CLAUDE.md section 5): browser roles (`anon`,
+`authenticated`) keep SELECT only on every table and every write policy is dropped,
+so no browser writes the database for any role (the API's direct connection is the
+only writer); default privileges keep future tables the same. `checkout_request_id`
+and `tourist_confirm_token` move to `transaction_secrets` (unreadable from the
+browser, not in Realtime). It also adds the `verifying` status and
+`stk_verifications` for STK Push Query (`STK_QUERY_MODE`). Proven by
+`scripts/verify_security.sh`.

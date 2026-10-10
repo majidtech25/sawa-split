@@ -103,13 +103,32 @@ total_amount          numeric not null check (total_amount > 0),
 maker_amount          numeric not null,     -- product_maker_amount + photo_amount
 driver_amount         numeric not null default 0,  -- product_driver_amount only
 stk_receipt           text unique,          -- mpesa only, null for cash
-status                text not null check (status in ('initiated','confirmed','failed','disputed','cash_unconfirmed','cash_confirmed','cash_expired')),
+status                text not null check (status in ('initiated','verifying','confirmed','failed','disputed','cash_unconfirmed','cash_confirmed','cash_expired')),
+                                            -- 'verifying': STK_QUERY_MODE=enforce, callback received, Safaricom not yet confirmed; nobody credited
 driver_confirmed_at   timestamptz,          -- cash Case A (driver_id set): driver's confirm tap
 maker_confirmed_at    timestamptz,          -- cash Case A and Case B: maker's confirm tap
 tourist_confirmed_at  timestamptz,          -- cash Case B (no driver_id): tourist's confirm tap
 confirmation_deadline timestamptz,          -- cash only: created_at + CASH_CONFIRM_WINDOW_MINUTES (default 10)
 created_at            timestamptz not null default now(),
 constraint transactions_at_least_one_component check (product_enabled or photo_enabled)
+-- checkout_request_id and tourist_confirm_token are NOT on this table: makers and drivers
+-- read it and Realtime streams it. They live in transaction_secrets (migration 0012).
+
+-- transaction_secrets   (no browser role can read it, not in the Realtime publication)
+transaction_id        uuid primary key references transactions(id) on delete cascade,
+checkout_request_id   text unique,          -- mpesa: Daraja's STK Push id, matched by the callback
+tourist_confirm_token text unique           -- cash Case B: the tourist's confirmation token
+
+-- stk_verifications   (STK Push Query check of each successful STK callback; section 6 step 2)
+transaction_id  uuid primary key references transactions(id) on delete cascade,
+mode            text not null check (mode in ('flag','enforce')),
+state           text not null default 'pending' check (state in ('pending','verified','mismatch','unanswered','amount_mismatch')),
+attempts        int not null default 0,
+next_check_at   timestamptz not null default now(),
+callback_amount numeric,
+last_result     jsonb,
+created_at      timestamptz not null default now(),
+updated_at      timestamptz not null default now()
 
 -- wallet_ledger_entries   (append-only — balances are computed, never stored directly; amounts never change)
 -- Only M-Pesa money is ever payable (rule 12). An M-Pesa sale writes the maker's and driver's
@@ -241,20 +260,32 @@ Four roles, no public self-registration:
 - **Producer / Driver** — coordinator-onboarded via Supabase Auth's admin API, phone number as identifier + a 4-digit PIN issued in person. Logs in with phone + PIN. Cash-confirmation taps (rule 12, Case A/B for maker; Case A for driver) happen from their authenticated dashboard session. A suspended or closed account (rule 17) is refused at login and on every API call, with the reason; a closed one is also banned in Supabase Auth.
 - **Coordinator/Admin** — same Supabase Auth mechanism, account carries an `is_admin` claim.
 
-Enforced twice: Supabase Row Level Security at the data layer, FastAPI endpoint checks at the API layer. Only FastAPI's service-role key (called **Secret key** under Supabase's current naming) writes to money-affecting tables — never exposed to the frontend, which uses the Publishable key instead.
+Enforced twice: Supabase Row Level Security at the data layer, FastAPI endpoint checks at the API layer. **The browser never writes to the database, for any role** *(migration 0012, 2026-10-09)*. The browser roles `anon` and `authenticated` hold SELECT and nothing else on every table, and there are no write policies at all. So no browser (maker, driver, coordinator or tourist) can insert, update or delete a row, whatever it sends with the Publishable key. Every change, including every coordinator action, goes through the FastAPI endpoints, which check who's calling and write with their own direct connection. That connection is the only writer, and its credentials and the Secret key are never exposed to the frontend. Default privileges keep any future table the same; `scripts/verify_security.sh` checks all of it.
 
-RLS permission matrix:
+Two columns are secret even from their owners: `checkout_request_id` (it would let someone aim a forged STK callback) and `tourist_confirm_token`. They live in `transaction_secrets`, which no browser role can read and Realtime doesn't stream. `auth_credentials` is likewise unreadable.
 
-| Role | producers/drivers | transactions | wallet_ledger_entries | withdrawal_requests | admin actions |
-|---|---|---|---|---|---|
-| Tourist | — | create (via pay endpoint only) + confirm own cash txn (token-scoped) | — | — | — |
-| Producer/Driver | read own | read own + confirm own cash txn | read own | create/read own | request/cancel own closure |
-| Coordinator | full | full + dispute flag | full | full + manual retry | reconciliation, registration, closure approve/reject, suspend/unsuspend, read audit log |
+Permission matrix. **Browser** is a direct read through Supabase with the Publishable key; **API** is a FastAPI endpoint:
+
+| Role | producers/drivers | transactions | wallet_ledger_entries, cash_debts | withdrawal_requests | closure_requests, suspensions, audit log | transaction_secrets, auth_credentials |
+|---|---|---|---|---|---|---|
+| Tourist | — | API: create (pay endpoint), confirm own Case B cash sale (token) | — | — | — | — |
+| Producer/Driver | browser: read own. Never write (status, split, phone, Till: coordinator only) | browser: read own. API: confirm own cash sale | browser: read own | browser: read own. API: withdraw | browser: read own closure requests. API: request/cancel own closure | — |
+| Coordinator | browser: read all. API: register | browser: read all. API: dispute/resolve, check payment | browser: read all | browser: read all. API: manual retry | browser: read all. API: approve/reject, suspend/unsuspend | — |
+| Anyone, browser | no writes on any table, ever | | | | | no reads either |
 
 ## 6. Money-movement sequence
 
 1. `POST /transactions/initiate` — for `payment_method: mpesa`, STK Push fires. For `payment_method: cash`, no Daraja call — the transaction is created directly in `cash_unconfirmed` status with `confirmation_deadline` set (`created_at + CASH_CONFIRM_WINDOW_MINUTES`).
-2. **M-Pesa path:** `POST /daraja/stk-callback` — Daraja confirms; backend checks the transaction reference (idempotent), writes `pending` ledger entries for the maker (product_maker_amount + photo_amount, whichever enabled) and, only if `product_enabled`, for the driver.
+2. **M-Pesa path:** `POST /daraja/stk-callback/{token}`. Each STK Push gives Daraja its own callback URL, whose token is an HMAC of the transaction id (`app/links.py`). The backend checks three things, in order:
+   - The token. Without this sale's token the callback is refused (403), so a POST to the public endpoint can't pose as Daraja.
+   - The reported `Amount`. It must equal the whole-shilling total the STK Push asked for, or the callback is refused (400) and flagged.
+   - The transaction reference, idempotently (rule 7).
+
+   Then Safaricom itself is asked (STK Push Query, `app/verification.py`), as `STK_QUERY_MODE` says:
+   - **`flag`** (default; sandbox and demo): credit at once, writing `pending` ledger entries for the maker (product_maker_amount + photo_amount, whichever enabled) and, only if `product_enabled`, for the driver. Then query in the background with retries (about 19 minutes), and flag a "not paid" or never-answered result to the coordinator under Reconciliation → Payment checks.
+   - **`enforce`**: the sale becomes `verifying` ("Payment being verified") and nobody is credited until Safaricom confirms. A "no" fails the sale. A query that never answers leaves it verifying and flagged; the coordinator can "Check again".
+
+   **Production must use `enforce`.** `flag` exists because the sandbox query is unreliable; in flag mode a forged-but-signed callback would be credited before it's flagged.
 2b. **Cash path (parallel to step 2):** `POST /transactions/:id/confirm` is called once by each required party per rule 12 (driver+maker for Case A, tourist+maker for Case B), and sets the corresponding `*_confirmed_at` field. Once all required confirmations for that transaction's case are present, status flips to `cash_confirmed`. Then the maker's share is written as a `cash_held` ledger entry (never payable), and the driver's share, if any, opens a `cash_debts` row that settles from the maker's M-Pesa-sourced balance as described in rule 12. Cash never reaches steps 4–5 itself; only a driver's settled share does, and that is M-Pesa money moved from the maker. If `confirmation_deadline` passes first, status flips to `cash_expired` instead and nothing is written for that transaction.
 3. Balance becomes `available` once cleared for payout eligibility. After every STK credit, the maker's outstanding cash debts are settled if the new balance covers them.
 4. `POST /withdrawals/request` (on-demand, full payable balance, ≥ KES 500) or the 18:00 EAT batch sweep (rule 10: settles debts first) triggers Daraja B2C, with a generated idempotency key, after the never-more-than-M-Pesa-collected check.
@@ -320,7 +351,7 @@ Production Daraja B2C approval (parallel-tracked, not a blocker for sandbox demo
 
 ## 11. Environment variables (names only — values come from where you saved them, never from this chat)
 
-Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), `DATABASE_URL` (asyncpg, `ssl=True` not `"require"`), `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_B2C_SHORTCODE`, `DARAJA_INITIATOR_NAME`, `DARAJA_SECURITY_CREDENTIAL`, `DARAJA_CALLBACK_BASE_URL`, `CORS_ORIGINS` (comma-separated frontend URLs allowed to call the API; defaults to the local Vite dev server), `CHECKOUT_LINK_SECRET` (HMAC key that signs price-card links, `app/links.py`; every printed card and the demo link are signed with it, so use the same value everywhere the API runs, and expect every card to stop working if it changes), `CASH_CONFIRM_WINDOW_MINUTES` (default 10 — kept as an env var, not a hardcoded constant, since the right window is genuinely unknown until Phase 0/1 field testing).
+Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), `DATABASE_URL` (asyncpg, `ssl=True` not `"require"`), `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_B2C_SHORTCODE`, `DARAJA_INITIATOR_NAME`, `DARAJA_SECURITY_CREDENTIAL`, `DARAJA_CALLBACK_BASE_URL`, `CORS_ORIGINS` (comma-separated frontend URLs allowed to call the API; defaults to the local Vite dev server), `CHECKOUT_LINK_SECRET` (HMAC key that signs price-card links and, under its own label, each STK Push's callback URL, `app/links.py`; every printed card and the demo link are signed with it, so use the same value everywhere the API runs, and expect every card to stop working if it changes), `STK_QUERY_MODE` (`flag` or `enforce`, default `flag`: how STK Push Query verification gates crediting, section 6 step 2. **Production must set `enforce`**), `CASH_CONFIRM_WINDOW_MINUTES` (default 10 — kept as an env var, not a hardcoded constant, since the right window is genuinely unknown until Phase 0/1 field testing).
 Frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_API_BASE_URL` (the backend's URL), `VITE_PUBLIC_APP_URL` (the frontend's own public URL, encoded into every printed QR: driver cards and price cards; unset, it falls back to whatever URL the coordinator's browser is on, so set it to the Render URL in Stage 9 and then re-run `frontend/scripts/regenerate-driver-qrs.mjs` so existing driver cards point there too).
 
 Set these as a Render Environment Group once the two Web Services exist (deferred from Phase G on purpose) — never commit them to the repo.

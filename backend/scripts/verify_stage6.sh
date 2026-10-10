@@ -43,6 +43,7 @@ login() {
   curl -s -m 60 -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" \
     -d "{\"phone\":\"$1\",\"pin\":\"$2\"}"
 }
+source scripts/sim_mpesa.sh
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -96,13 +97,8 @@ trap cleanup EXIT
 
 echo
 echo "== Setup: simulated M-Pesa sale, product 2000 + photo 10 (maker 1410, driver 600) =="
-SALE=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 2000 10 "$DRIVER_ID")
-TXN_ID=$(echo "$SALE" | json "['id']")
-[ -n "$TXN_ID" ] || { echo "FATAL: could not create the simulated M-Pesa sale: $SALE"; exit 1; }
+TXN_ID=$(mpesa_sale "$PRODUCER_ID" 2000 10 "$DRIVER_ID") || exit 1
 TXN_IDS+=("$TXN_ID")
-curl -s -X POST "$BASE_URL/daraja/stk-callback" -H "Content-Type: application/json" -d "{
-  \"Body\": {\"stkCallback\": {\"CheckoutRequestID\": \"$(echo "$SALE" | json "['checkout_request_id']")\", \"ResultCode\": 0,
-  \"CallbackMetadata\": {\"Item\": [{\"Name\": \"MpesaReceiptNumber\", \"Value\": \"SIM${TXN_ID:0:8}\"}]}}}}" >/dev/null
 check "simulated callback confirmed the M-Pesa sale" "$(q "select status from transactions where id = '$TXN_ID';")" "confirmed"
 check "maker 1410 available" "$(q "select amount from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'maker' and status = 'available';")" "1410.00"
 check "driver 600 available" "$(q "select amount from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'driver' and status = 'available';")" "600.00"

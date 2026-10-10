@@ -1,3 +1,4 @@
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import field_validator
@@ -25,6 +26,13 @@ class Settings(BaseSettings):
     # HMAC key for price-card links (app/links.py). Changing it invalidates every
     # printed card, so the same value must be set wherever the API runs.
     checkout_link_secret: str
+
+    # STK Push Query check on every successful STK callback (app/verification.py):
+    #   flag    - credit at once, query Safaricom in the background, flag mismatches to
+    #             the coordinator. For sandbox and the demo.
+    #   enforce - credit only after Safaricom confirms; until then the sale is
+    #             "Payment being verified" and nobody is credited. PRODUCTION MUST USE THIS.
+    stk_query_mode: Literal["flag", "enforce"] = "flag"
 
     # Comma-separated browser origins allowed to call the API (the frontend's URL).
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

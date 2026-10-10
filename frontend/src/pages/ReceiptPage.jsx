@@ -120,6 +120,20 @@ export default function ReceiptPage() {
         </section>
       )}
 
+      {receipt.status === "verifying" && (
+        <section aria-live="polite" className="rounded-sawa border border-sawa-border bg-sawa-surface p-5">
+          <StatusBadge status="verifying" />
+          <h1 className="mt-3 text-2xl font-semibold">Payment being verified</h1>
+          <p className="mt-1 text-[15px] text-sawa-text-muted">
+            M-Pesa says you paid <span className="font-mono">{ksh(receipt.total_amount)}</span>. We're confirming it with
+            Safaricom before the split is credited. You don't need to do anything; this page updates on its own.
+          </p>
+          {receipt.stk_receipt && (
+            <p className="mt-2 font-mono text-[13px] text-sawa-text-muted">M-Pesa receipt {receipt.stk_receipt}</p>
+          )}
+        </section>
+      )}
+
       {(receipt.status === "confirmed" || receipt.status === "cash_confirmed") && (
         <section aria-live="polite" className="flex items-center gap-5">
           <VerifiedStamp amount={receipt.total_amount} at={receipt.created_at} place={receipt.site} />

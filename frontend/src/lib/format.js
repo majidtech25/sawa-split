@@ -26,5 +26,6 @@ export const eatDateTime = (iso) => `${eatDate(iso)}, ${eatTime(iso)}`
 
 // A failed STK Push or an expired cash sale never wrote ledger entries (rules 6, 12),
 // so its stored split was never credited to anyone and isn't shown as if it were.
-const NEVER_CREDITED = new Set(["failed", "cash_expired"])
+// A sale still "Payment being verified" (STK_QUERY_MODE=enforce) isn't credited yet either.
+const NEVER_CREDITED = new Set(["failed", "cash_expired", "verifying", "initiated"])
 export const wasCredited = (status) => !NEVER_CREDITED.has(status)

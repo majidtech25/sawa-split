@@ -108,6 +108,8 @@ function PendingDot() {
 // "still resolving", visibly different from both those and a dispute.
 const STATUS = {
   initiated: { label: "Pending", icon: <PendingDot />, tone: "text-sawa-text-muted" },
+  // Enforce mode: the callback said paid; Safaricom hasn't confirmed it yet, so nobody is credited.
+  verifying: { label: "Payment being verified", icon: <PendingDot />, tone: "text-sawa-text-muted" },
   confirmed: { label: "Confirmed", icon: <Check aria-hidden="true" className="size-3.5" />, tone: "text-sawa-green" },
   failed: { label: "Failed", icon: <AlertTriangle aria-hidden="true" className="size-3.5" />, tone: "text-sawa-terracotta" },
   disputed: { label: "Disputed", icon: <Flag aria-hidden="true" className="size-3.5" />, tone: "text-sawa-text font-semibold" },

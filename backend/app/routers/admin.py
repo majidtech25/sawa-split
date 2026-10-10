@@ -1,5 +1,6 @@
 """Coordinator-only: reconciliation (CLAUDE.md section 6 step 6) and disputes (rule 13)."""
 
+import uuid
 from decimal import Decimal
 from urllib.parse import urlencode
 from typing import Annotated, Any
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import links
+from .. import links, verification
 from ..db import get_session
 from .public import build_checkout
 from ..security import require_admin
@@ -23,7 +24,7 @@ class Totals(BaseModel):
     frozen: Decimal             # the part of `pending` held by disputes
     ledger_paid: Decimal        # ledger entries marked paid
     balanced: bool              # collected == ledger_paid + pending, and ledger_paid == disbursed
-    needs_attention: int        # expired cash sales + payouts waiting for a coordinator retry
+    needs_attention: int        # expired cash sales + payouts waiting for a coordinator retry + flagged payment checks
     cash_recorded: Decimal      # confirmed cash sales (disputed included): held by makers, never paid out by B2C
     debts_outstanding: Decimal  # drivers' shares of cash sales that makers still owe
 
@@ -62,8 +63,22 @@ class DebtRow(BaseModel):
     disputed: bool
 
 
+class PaymentCheck(BaseModel):
+    transaction_id: str
+    created_at: str
+    producer_name: str
+    total_amount: Decimal
+    transaction_status: str     # 'confirmed' (credited, flag mode), 'verifying' (enforce), 'initiated', 'failed'
+    state: str                  # pending (enforce only), mismatch, unanswered, amount_mismatch
+    mode: str
+    attempts: int
+    callback_amount: Decimal | None
+    last_result: str | None     # Safaricom's last answer, in words
+
+
 class ReconciliationResponse(BaseModel):
     totals: Totals
+    payment_checks: list[PaymentCheck]
     debts: list[DebtRow]
     transactions: list[TransactionRow]
     withdrawals: list[WithdrawalRow]
@@ -93,7 +108,9 @@ async def reconciliation(
                   (select coalesce(sum(amount), 0) from wallet_ledger_entries where status = 'frozen') as frozen,
                   (select coalesce(sum(amount), 0) from wallet_ledger_entries where status = 'paid') as ledger_paid,
                   (select count(*) from transactions where status = 'cash_expired')
-                    + (select count(*) from withdrawal_requests where status = 'failed') as needs_attention
+                    + (select count(*) from withdrawal_requests where status = 'failed')
+                    + (select count(*) from stk_verifications
+                         where state in ('mismatch', 'unanswered', 'amount_mismatch')) as needs_attention
                 """
             )
         )
@@ -109,6 +126,24 @@ async def reconciliation(
         cash_recorded=t.cash_recorded,
         debts_outstanding=t.debts_outstanding,
     )
+
+    # STK Push Query checks a coordinator should see: anything Safaricom contradicted,
+    # never answered, or a callback with the wrong amount, plus sales still verifying.
+    checks = (
+        await session.execute(
+            text(
+                """
+                select v.*, t.created_at as txn_created_at, t.total_amount, t.status as txn_status, p.name as producer_name
+                from stk_verifications v
+                join transactions t on t.id = v.transaction_id
+                join producers p on p.id = t.producer_id
+                where v.state in ('mismatch', 'unanswered', 'amount_mismatch') or t.status = 'verifying'
+                order by t.created_at desc
+                limit 200
+                """
+            )
+        )
+    ).all()
 
     debts = (
         await session.execute(
@@ -161,6 +196,15 @@ async def reconciliation(
 
     return ReconciliationResponse(
         totals=totals,
+        payment_checks=[
+            PaymentCheck(
+                transaction_id=str(c.transaction_id), created_at=c.txn_created_at.isoformat(),
+                producer_name=c.producer_name, total_amount=c.total_amount, transaction_status=c.txn_status,
+                state=c.state, mode=c.mode, attempts=c.attempts, callback_amount=c.callback_amount,
+                last_result=(c.last_result or {}).get("description"),
+            )
+            for c in checks
+        ],
         debts=[
             DebtRow(
                 id=str(d.id), created_at=d.created_at.isoformat(), producer_name=d.producer_name,
@@ -271,6 +315,44 @@ async def clear_dispute(
     await session.execute(text("update transactions set status = :s where id = :id"), {"s": restored, "id": transaction_id})
     await session.commit()
     return DisputeResponse(id=transaction_id, status=restored, ledger_entries_changed=thawed.rowcount)
+
+
+class PaymentCheckResult(BaseModel):
+    transaction_id: str
+    state: str
+    transaction_status: str
+
+
+@router.post("/transactions/{transaction_id}/check-payment", response_model=PaymentCheckResult)
+async def check_payment_now(
+    transaction_id: str,
+    _admin: Annotated[dict[str, Any], Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PaymentCheckResult:
+    """Asks Safaricom again, now, whether an M-Pesa sale was paid (STK Push Query).
+    For a sale stuck "Payment being verified" (enforce mode) a yes credits it at once;
+    a no fails it. In flag mode it re-checks a flagged sale."""
+    exists = (
+        await session.execute(
+            text("select 1 from stk_verifications where transaction_id = cast(:id as uuid)"), {"id": transaction_id}
+        )
+    ).one_or_none() if _is_uuid(transaction_id) else None
+    if exists is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This sale has no payment check.")
+    await session.commit()
+    state = await verification.check_payment(session, transaction_id, force=True)
+    txn_status = (
+        await session.execute(text("select status from transactions where id = cast(:id as uuid)"), {"id": transaction_id})
+    ).scalar_one()
+    return PaymentCheckResult(transaction_id=transaction_id, state=state, transaction_status=txn_status)
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except ValueError:
+        return False
 
 
 class PriceCardRequest(BaseModel):

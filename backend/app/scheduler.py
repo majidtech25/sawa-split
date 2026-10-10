@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from . import payouts
+from . import payouts, verification
 
 log = logging.getLogger("sawa.scheduler")
 
@@ -27,5 +27,10 @@ def build_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(
         payouts.expire_unconfirmed_cash, IntervalTrigger(minutes=1),
         id="expire_unconfirmed_cash", coalesce=True, max_instances=1,
+    )
+    # Section 6 step 2: have Safaricom confirm each STK callback (STK_QUERY_MODE).
+    scheduler.add_job(
+        verification.run_due_checks, IntervalTrigger(seconds=20),
+        id="stk_push_query", coalesce=True, max_instances=1,
     )
     return scheduler

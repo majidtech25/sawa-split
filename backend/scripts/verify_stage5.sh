@@ -36,6 +36,9 @@ login() {
     -d "{\"phone\":\"$1\",\"pin\":\"$2\"}"
 }
 
+q() { psql "$DATABASE_URL" -tAc "$1"; }
+json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(d$1 if isinstance(d, dict) else '')" 2>/dev/null; }
+source scripts/sim_mpesa.sh
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then
@@ -100,12 +103,9 @@ if [ -z "$RECEIPT" ]; then
   # it would confirm and credit the transaction itself, proving nothing about rule 7.
   echo "SKIP  no real STK callback landed in Test 1, so there is nothing to redeliver"
 else
-CHECKOUT_ID=$(psql "$DATABASE_URL" -tAc "select checkout_request_id from transactions where id = '$TXN_ID';")
-curl -s -X POST "$BASE_URL/daraja/stk-callback" -H "Content-Type: application/json" -d "{
-  \"Body\": {\"stkCallback\": {\"CheckoutRequestID\": \"$CHECKOUT_ID\", \"ResultCode\": 0, \"CallbackMetadata\": {\"Item\": [
-    {\"Name\": \"Amount\", \"Value\": 60}, {\"Name\": \"MpesaReceiptNumber\", \"Value\": \"REPLAYED\"}
-  ]}}}
-}" >/dev/null
+CHECKOUT_ID=$(psql "$DATABASE_URL" -tAc "select checkout_request_id from transaction_secrets where transaction_id = '$TXN_ID';")
+# Replayed to the sale's own signed callback URL, as a genuine redelivery would be.
+stk_callback "$(callback_token "$TXN_ID")" "$CHECKOUT_ID" 60 "REPLAYED" >/dev/null
 LEDGER_COUNT=$(psql "$DATABASE_URL" -tAc "select count(*) from wallet_ledger_entries where transaction_id = '$TXN_ID';")
 check "redelivered callback did not create extra ledger entries" "$LEDGER_COUNT" "2"
 RECEIPT_AFTER=$(psql "$DATABASE_URL" -tAc "select stk_receipt from transactions where id = '$TXN_ID';")
