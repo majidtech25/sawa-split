@@ -35,6 +35,11 @@ TXN_IDS=()
 q() { psql "$DATABASE_URL" -tAc "$1"; }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(d$1 if isinstance(d, dict) else '')" 2>/dev/null; }
 source scripts/sim_mpesa.sh
+# A setup step that produced nothing (an id, a token) stops the run: every check after
+# it would be testing the wrong state. cleanup() then reports the run as invalid.
+SETUP_FAILED=""
+CLEANUP_OK=0
+need() { [ -n "$2" ] && return 0; SETUP_FAILED="$1"; echo "FATAL: setup step failed: $1" >&2; exit 1; }
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -74,7 +79,7 @@ cleanup() {
   local ids="" t
   for t in "${TXN_IDS[@]}"; do [ -n "$t" ] && ids="$ids,'$t'"; done
   ids="${ids#,}"
-  [ -z "$ids" ] && { echo "nothing to clean"; return; }
+  if [ -z "$ids" ]; then echo "nothing to clean"; CLEANUP_OK=1; else
   # transaction_secrets and stk_verifications go with their transaction (on delete cascade).
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
     begin;
@@ -82,7 +87,13 @@ cleanup() {
       or settlement_id in (select id from cash_debts where transaction_id in ($ids));
     delete from cash_debts where transaction_id in ($ids);
     delete from transactions where id in ($ids);
-    commit;" && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
+    commit;" && CLEANUP_OK=1 && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
+  fi
+  if [ -n "$SETUP_FAILED" ]; then
+    echo "== RUN INVALID: setup step failed ($SETUP_FAILED). Checks after it prove nothing. =="; exit 1
+  fi
+  [ "$CLEANUP_OK" = 1 ] || { echo "== RUN FAILED: cleanup failed, test rows may be left in the database =="; exit 1; }
+  [ "$FAIL" -eq 0 ] && exit 0 || exit 1
 }
 
 echo "== Logging in fixtures =="
@@ -99,7 +110,7 @@ BUSY=$(q "select count(*) from wallet_ledger_entries where recipient_id in ('$PR
 trap cleanup EXIT
 
 # One real sale of the maker's own, so updates have a row they could otherwise reach.
-OWN=$(mpesa_sale "$PRODUCER_ID" 100 - "$DRIVER_ID") || exit 1; TXN_IDS+=("$OWN")
+OWN=$(mpesa_sale "$PRODUCER_ID" 100 - "$DRIVER_ID"); need "the maker's own M-Pesa sale" "$OWN"; TXN_IDS+=("$OWN")
 check "setup: the maker has a confirmed M-Pesa sale of their own" "$(q "select status from transactions where id = '$OWN';")" "confirmed"
 BEFORE=$(q "select md5(string_agg(t::text, '|' order by t::text)) from (
   select row(p.*)::text as t from producers p union all select row(d.*)::text from drivers d
@@ -173,7 +184,7 @@ check "Realtime streams no table that holds a secret" \
 echo
 echo "== Test 3: forged STK callbacks =="
 SALE=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 200 -)
-F_ID=$(echo "$SALE" | json "['id']"); TXN_IDS+=("$F_ID")
+F_ID=$(echo "$SALE" | json "['id']"); need "sale to forge callbacks against" "$F_ID"; TXN_IDS+=("$F_ID")
 F_CRID=$(echo "$SALE" | json "['checkout_request_id']"); F_TOKEN=$(echo "$SALE" | json "['callback_token']")
 OLD=$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST "$BASE_URL/daraja/stk-callback" -H "Content-Type: application/json" \
   -d "{\"Body\":{\"stkCallback\":{\"CheckoutRequestID\":\"$F_CRID\",\"ResultCode\":0,\"CallbackMetadata\":{\"Item\":[{\"Name\":\"Amount\",\"Value\":200}]}}}}")
@@ -198,9 +209,9 @@ check "a non-coordinator can't trigger a check (403)" "$(curl -s -o /dev/null -w
 echo
 echo "== Test 4: STK_QUERY_MODE=enforce =="
 COLLECTED_BEFORE=$(curl -s -m 60 "$BASE_URL/admin/reconciliation" -H "Authorization: Bearer $COORD_TOKEN" | json "['totals']['collected']")
-E1=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E1_ID=$(echo "$E1" | json "['id']"); TXN_IDS+=("$E1_ID")
-E2=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E2_ID=$(echo "$E2" | json "['id']"); TXN_IDS+=("$E2_ID")
-E3=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E3_ID=$(echo "$E3" | json "['id']"); TXN_IDS+=("$E3_ID")
+E1=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E1_ID=$(echo "$E1" | json "['id']"); need "enforce-mode sale 1" "$E1_ID"; TXN_IDS+=("$E1_ID")
+E2=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E2_ID=$(echo "$E2" | json "['id']"); need "enforce-mode sale 2" "$E2_ID"; TXN_IDS+=("$E2_ID")
+E3=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E3_ID=$(echo "$E3" | json "['id']"); need "enforce-mode sale 3" "$E3_ID"; TXN_IDS+=("$E3_ID")
 ENFORCE=$(PYTHONPATH=. .venv/bin/python - "$E1" "$E2" "$E3" <<'PY'
 import asyncio, json, sys
 from sqlalchemy import text

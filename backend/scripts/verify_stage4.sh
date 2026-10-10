@@ -44,6 +44,11 @@ login() {
   echo "$r"
 }
 source scripts/sim_mpesa.sh
+# A setup step that produced nothing (an id, a token) stops the run: every check after
+# it would be testing the wrong state. cleanup() then reports the run as invalid.
+SETUP_FAILED=""
+CLEANUP_OK=0
+need() { [ -n "$2" ] && return 0; SETUP_FAILED="$1"; echo "FATAL: setup step failed: $1" >&2; exit 1; }
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -70,14 +75,20 @@ cleanup() {
   local ids="" t
   for t in "${TXN_IDS[@]}"; do [ -n "$t" ] && ids="$ids,'$t'"; done
   ids="${ids#,}"
-  [ -z "$ids" ] && { echo "nothing to clean"; return; }
+  if [ -z "$ids" ]; then echo "nothing to clean"; CLEANUP_OK=1; else
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
     begin;
     delete from wallet_ledger_entries where transaction_id in ($ids)
       or settlement_id in (select id from cash_debts where transaction_id in ($ids));
     delete from cash_debts where transaction_id in ($ids);
     delete from transactions where id in ($ids);
-    commit;" && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
+    commit;" && CLEANUP_OK=1 && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
+  fi
+  if [ -n "$SETUP_FAILED" ]; then
+    echo "== RUN INVALID: setup step failed ($SETUP_FAILED). Checks after it prove nothing. =="; exit 1
+  fi
+  [ "$CLEANUP_OK" = 1 ] || { echo "== RUN FAILED: cleanup failed, test rows may be left in the database =="; exit 1; }
+  [ "$FAIL" -eq 0 ] && exit 0 || exit 1
 }
 
 echo "== Logging in fixtures =="
@@ -100,7 +111,7 @@ trap cleanup EXIT
 
 echo
 echo "== Test 1: Case A cash (driver + maker), product 200 at a 30% driver split =="
-T1=$(cash_sale 200 - "$DRIVER_ID" "$DRIVER_QR"); T1_ID=$(echo "$T1" | json "['id']"); TXN_IDS+=("$T1_ID")
+T1=$(cash_sale 200 - "$DRIVER_ID" "$DRIVER_QR"); T1_ID=$(echo "$T1" | json "['id']"); need "Case A cash sale" "$T1_ID"; TXN_IDS+=("$T1_ID")
 check "created cash_unconfirmed" "$(echo "$T1" | json "['status']")" "cash_unconfirmed"
 check "driver alone does not complete it" "$(confirm "$T1_ID" "$DRIVER_TOKEN")" "cash_unconfirmed"
 check "maker completes it" "$(confirm "$T1_ID" "$PRODUCER_TOKEN")" "cash_confirmed"
@@ -114,7 +125,7 @@ check "maker can't withdraw while owing a driver (422, no B2C call)" \
 
 echo
 echo "== Test 2: Case B cash (tourist + maker, no driver), product 150 + photo 20 =="
-T2=$(cash_sale 150 20); T2_ID=$(echo "$T2" | json "['id']"); TXN_IDS+=("$T2_ID")
+T2=$(cash_sale 150 20); T2_ID=$(echo "$T2" | json "['id']"); need "Case B cash sale" "$T2_ID"; TXN_IDS+=("$T2_ID")
 TOURIST_TOKEN=$(echo "$T2" | json "['tourist_confirm_token']")
 check "maker_amount is the full 170 (no driver)" "$(echo "$T2" | json "['maker_amount']")" "170"
 check "wrong tourist token rejected" "$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST "$BASE_URL/transactions/$T2_ID/confirm" -H "Content-Type: application/json" -d '{"tourist_token":"wrong"}')" "403"
@@ -125,7 +136,7 @@ check "Case B opens no debt" "$(q "select count(*) from cash_debts where transac
 
 echo
 echo "== Test 3: the debt settles once the maker earns by M-Pesa (product 100, no driver) =="
-M1_ID=$(mpesa_sale "$PRODUCER_ID" 100 -) || exit 1; TXN_IDS+=("$M1_ID")
+M1_ID=$(mpesa_sale "$PRODUCER_ID" 100 -); need "simulated M-Pesa sale" "$M1_ID"; TXN_IDS+=("$M1_ID")
 check "simulated callback confirmed the M-Pesa sale" "$(q "select status from transactions where id = '$M1_ID';")" "confirmed"
 check "the debt is settled" "$(q "select status from cash_debts where transaction_id = '$T1_ID';")" "settled"
 check "the maker's 100 entry was transferred" "$(q "select status from wallet_ledger_entries where transaction_id = '$M1_ID' and settlement_id is not null and amount = 100;")" "transferred"
@@ -146,7 +157,7 @@ check "reconciliation balanced" "$(recon balanced)" "True"
 echo
 echo "== Test 5: a fake Case A cash sale nets the maker + driver pair zero =="
 PAIR_BEFORE=$(add "$(me "$PRODUCER_TOKEN" payable)" "$(me "$DRIVER_TOKEN" payable)")
-F=$(cash_sale 100 - "$DRIVER_ID" "$DRIVER_QR"); F_ID=$(echo "$F" | json "['id']"); TXN_IDS+=("$F_ID")
+F=$(cash_sale 100 - "$DRIVER_ID" "$DRIVER_QR"); F_ID=$(echo "$F" | json "['id']"); need "fake Case A cash sale" "$F_ID"; TXN_IDS+=("$F_ID")
 confirm "$F_ID" "$DRIVER_TOKEN" >/dev/null
 check "colluding driver + maker confirm the fake sale" "$(confirm "$F_ID" "$PRODUCER_TOKEN")" "cash_confirmed"
 check "its 30 debt settled at once from the maker's 40" "$(q "select status from cash_debts where transaction_id = '$F_ID';")" "settled"
@@ -180,12 +191,26 @@ check "no withdrawal rows were created" "$(q "select count(*) from withdrawal_re
 
 echo
 echo "== Test 7: an expired cash sale writes nothing =="
-T3=$(cash_sale 100 -); T3_ID=$(echo "$T3" | json "['id']"); TXN_IDS+=("$T3_ID")
+T3=$(cash_sale 100 -); T3_ID=$(echo "$T3" | json "['id']"); need "cash sale to expire" "$T3_ID"; TXN_IDS+=("$T3_ID")
 T3_TOKEN=$(echo "$T3" | json "['tourist_confirm_token']")
 q "update transactions set confirmation_deadline = now() - interval '1 minute' where id = '$T3_ID';" >/dev/null
 check "confirm after the deadline rejected" "$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST "$BASE_URL/transactions/$T3_ID/confirm" -H "Content-Type: application/json" -d "{\"tourist_token\":\"$T3_TOKEN\"}")" "409"
 check "flipped to cash_expired" "$(q "select status from transactions where id = '$T3_ID';")" "cash_expired"
 check "no ledger entries, no debt" "$(q "select (select count(*) from wallet_ledger_entries where transaction_id = '$T3_ID') + (select count(*) from cash_debts where transaction_id = '$T3_ID');")" "0"
+
+echo
+echo "== Test 8: prices are whole shillings only =="
+CENTS_MSG="Prices must be whole shillings"
+R=$(curl -s -m 60 -X POST "$BASE_URL/admin/price-cards" -H "Authorization: Bearer $COORD_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"product_amount\":150.50}")
+check "a price card at 150.50 is refused, with the reason" "$(echo "$R" | json "['detail']" | cut -c1-30)" "$CENTS_MSG"
+R=$(curl -s -m 60 "$BASE_URL/public/checkout/$PRODUCER_ID?product=150.50&sig=$(sig "$PRODUCER_ID" 150.50 -)")
+check "checkout of a (validly signed) 150.50 link is refused, with the reason" "$(echo "$R" | json "['detail']" | cut -c1-30)" "$CENTS_MSG"
+R=$(curl -s -m 60 -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":150.5,\"link_sig\":\"$(sig "$PRODUCER_ID" 150.5 -)\"}")
+check "starting a 150.50 sale is refused, with the reason (nothing created)" "$(echo "$R" | json "['detail']" | cut -c1-30) $(q "select count(*) from transactions where total_amount = 150.5;")" "$CENTS_MSG 0"
+check "a whole-shilling price card (150) is made" \
+  "$(curl -s -m 60 -X POST "$BASE_URL/admin/price-cards" -H "Authorization: Bearer $COORD_TOKEN" -H "Content-Type: application/json" -d "{\"producer_id\":\"$PRODUCER_ID\",\"product_amount\":150}" | json "['total_amount']")" "150"
 
 echo
 echo "== Summary: $PASS passed, $FAIL failed =="

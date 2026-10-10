@@ -20,6 +20,16 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 MIN_TRANSACTION_AMOUNT = Decimal("50")  # CLAUDE.md section 4 rule 5 — business floor, not Daraja's own KES 1 floor.
 
+# M-Pesa charges whole shillings (the STK Push sends int(amount)), so a price with cents
+# would charge less than the ledger credits. Prices are refused unless whole.
+WHOLE_SHILLINGS = "Prices must be whole shillings, with no cents (for example 150, not 150.50)."
+
+
+def require_whole_shillings(*amounts) -> None:
+    for amount in amounts:
+        if amount is not None and Decimal(amount) != Decimal(amount).to_integral_value():
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, WHOLE_SHILLINGS)
+
 
 # CLAUDE.md section 5: the public pay-initiate endpoint is rate-limited per phone
 # number, so nobody can flood a stranger's phone with STK prompts. In-process memory
@@ -109,6 +119,8 @@ async def initiate_transaction(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This producer does not charge for product.")
     if body.photo_enabled and not producer.charges_photo:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This producer does not charge for photo consent.")
+
+    require_whole_shillings(body.product_amount, body.photo_amount)
 
     driver_qr = None
     if body.driver_id is not None:

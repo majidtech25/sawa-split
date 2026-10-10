@@ -48,6 +48,11 @@ login() {
 }
 code() { curl -s -o /dev/null -w '%{http_code}' -m 60 "$@"; }
 source scripts/sim_mpesa.sh
+# A setup step that produced nothing (an id, a token) stops the run: every check after
+# it would be testing the wrong state. cleanup() then reports the run as invalid.
+SETUP_FAILED=""
+CLEANUP_OK=0
+need() { [ -n "$2" ] && return 0; SETUP_FAILED="$1"; echo "FATAL: setup step failed: $1" >&2; exit 1; }
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -111,7 +116,7 @@ cleanup() {
     $([ -n "$TEMP_DRIVER_ID" ] && echo "
     delete from closure_requests where party_id = '$TEMP_DRIVER_ID';
     delete from drivers where id = '$TEMP_DRIVER_ID';")
-    commit;" && echo "database cleanup ok" || echo "database cleanup FAILED — test rows may still be present"
+    commit;" && CLEANUP_OK=1 && echo "database cleanup ok" || echo "database cleanup FAILED — test rows may still be present"
   unban "$PRODUCER_PHONE"; unban "$DRIVER_PHONE"
   if [ -n "$TEMP_DRIVER_ID" ]; then
     local temp_user
@@ -125,6 +130,10 @@ cleanup() {
     "$(login "$PRODUCER_PHONE" "$PRODUCER_PIN" | json "['role']") $(login "$DRIVER_PHONE" "$DRIVER_PIN" | json "['role']")" "producer driver"
   echo
   echo "== Summary: $PASS passed, $FAIL failed =="
+  if [ -n "$SETUP_FAILED" ]; then
+    echo "== RUN INVALID: setup step failed ($SETUP_FAILED). Checks after it prove nothing. =="; exit 1
+  fi
+  [ "$CLEANUP_OK" = 1 ] || { echo "== RUN FAILED: cleanup failed, test rows may be left in the database =="; exit 1; }
   [ "$FAIL" -eq 0 ] && exit 0 || exit 1
 }
 
@@ -158,18 +167,18 @@ check "nothing left to cancel (409)" "$(post_code /accounts/me/closure/cancel "$
 
 echo
 echo "== Test 2: approval is refused while anything is still in motion, then rejected =="
-REQ=$(post /accounts/me/closure "$DRIVER_TOKEN" '{"reason":"[test] retiring"}' | json "['id']")
+REQ=$(post /accounts/me/closure "$DRIVER_TOKEN" '{"reason":"[test] retiring"}' | json "['id']"); need "driver's closure request" "$REQ"
 check "a non-coordinator can't approve (403)" "$(post_code "/admin/closure-requests/$REQ/approve" "$DRIVER_TOKEN")" "403"
 CASH=$(curl -s -m 60 -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
   -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":200,\"link_sig\":\"$(sig "$PRODUCER_ID" 200 - "$DRIVER_QR")\"}")
-CASH_ID=$(echo "$CASH" | json "['id']"); TXN_IDS+=("$CASH_ID")
+CASH_ID=$(echo "$CASH" | json "['id']"); need "cash sale" "$CASH_ID"; TXN_IDS+=("$CASH_ID")
 R=$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")
 contains "blocked: a cash sale waiting for confirmation" "$R" "waiting for confirmation"
 contains "the coordinator's list shows the same blocker" "$(admin_accounts)" "waiting for confirmation"
 post "/transactions/$CASH_ID/confirm" "$DRIVER_TOKEN" >/dev/null
 check "cash sale confirmed by driver + maker" "$(post "/transactions/$CASH_ID/confirm" "$PRODUCER_TOKEN" | json "['status']")" "cash_confirmed"
 contains "blocked: the maker still owes this driver 60" "$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")" "still owed to this driver"
-M_ID=$(mpesa_sale "$PRODUCER_ID" 100 -) || exit 1; TXN_IDS+=("$M_ID")
+M_ID=$(mpesa_sale "$PRODUCER_ID" 100 -); need "simulated M-Pesa sale" "$M_ID"; TXN_IDS+=("$M_ID")
 check "a simulated M-Pesa sale settles the debt (driver payable 60)" "$(me "$DRIVER_TOKEN" | json "['payable']")" "60.00"
 post "/admin/transactions/$CASH_ID/dispute" "$COORD_TOKEN" >/dev/null
 contains "blocked: an open dispute" "$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")" "open dispute"
@@ -215,7 +224,7 @@ PRODUCER_TOKEN=$(login "$PRODUCER_PHONE" "$PRODUCER_PIN" | json "['access_token'
 
 echo
 echo "== Test 4: a failed final payout leaves the account open (driver, real 2040) =="
-REQ=$(post /accounts/me/closure "$DRIVER_TOKEN" '{"reason":"[test] leaving"}' | json "['id']")
+REQ=$(post /accounts/me/closure "$DRIVER_TOKEN" '{"reason":"[test] leaving"}' | json "['id']"); need "driver's second closure request" "$REQ"
 A=$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN" '{"note":"[test] approved"}')
 check "approved, account closing" "$(echo "$A" | json "['status']") $(echo "$A" | json "['account_status']")" "approved closing"
 check "final payout is the payable 60, below KES 500" "$(echo "$A" | json "['payout']['amount']")" "60.00"
@@ -230,7 +239,7 @@ check "the funds never left 'available'" "$(q "select status from wallet_ledger_
 echo
 echo "== Test 5: a final payout to the sandbox number closes the account (producer) =="
 TXNS_BEFORE=$(q "select count(*) from transactions where producer_id = '$PRODUCER_ID';")
-REQ=$(post /accounts/me/closure "$PRODUCER_TOKEN" '{"reason":"[test] closing the stall"}' | json "['id']")
+REQ=$(post /accounts/me/closure "$PRODUCER_TOKEN" '{"reason":"[test] closing the stall"}' | json "['id']"); need "producer's closure request" "$REQ"
 A=$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")
 check "approved, final payout of the payable 40" "$(echo "$A" | json "['status']") $(echo "$A" | json "['payout']['amount']")" "approved 40.00"
 check "no new sales while closing (checkout refuses)" "$(code "$BASE_URL/public/checkout/$PRODUCER_ID?product=100&sig=$(sig "$PRODUCER_ID" 100 -)")" "422"
@@ -246,9 +255,9 @@ echo
 echo "== Test 6: closing with nothing to pay closes at once (temporary driver) =="
 TEMP_QR="SAWA-DRV-TEST$(date +%s | tail -c 5)"
 T=$(post /auth/onboard "$COORD_TOKEN" "{\"role\":\"driver\",\"phone\":\"$TEMP_PHONE\",\"pin\":\"$TEMP_PIN\",\"name\":\"Temp Test\",\"till\":\"000000\",\"qr_code\":\"$TEMP_QR\"}")
-TEMP_DRIVER_ID=$(echo "$T" | json "['id']")
-TEMP_TOKEN=$(login "$TEMP_PHONE" "$TEMP_PIN" | json "['access_token']")
-REQ=$(post /accounts/me/closure "$TEMP_TOKEN" '{"reason":"[test] temporary account"}' | json "['id']")
+TEMP_DRIVER_ID=$(echo "$T" | json "['id']"); need "temporary driver" "$TEMP_DRIVER_ID"
+TEMP_TOKEN=$(login "$TEMP_PHONE" "$TEMP_PIN" | json "['access_token']"); need "temporary driver login" "$TEMP_TOKEN"
+REQ=$(post /accounts/me/closure "$TEMP_TOKEN" '{"reason":"[test] temporary account"}' | json "['id']"); need "temporary driver's closure request" "$REQ"
 A=$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")
 check "closed immediately, no payout" "$(echo "$A" | json "['status']") $(echo "$A" | json "['payout']")" "closed None"
 check "its QR page now says not registered (404)" "$(code "$BASE_URL/public/drivers/$TEMP_QR")" "404"

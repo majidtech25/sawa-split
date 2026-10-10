@@ -44,6 +44,11 @@ login() {
     -d "{\"phone\":\"$1\",\"pin\":\"$2\"}"
 }
 source scripts/sim_mpesa.sh
+# A setup step that produced nothing (an id, a token) stops the run: every check after
+# it would be testing the wrong state. cleanup() then reports the run as invalid.
+SETUP_FAILED=""
+CLEANUP_OK=0
+need() { [ -n "$2" ] && return 0; SETUP_FAILED="$1"; echo "FATAL: setup step failed: $1" >&2; exit 1; }
 check() {
   local desc="$1" actual="$2" expected="$3"
   if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
@@ -64,7 +69,7 @@ cleanup() {
   local ids="" t
   for t in "${TXN_IDS[@]}"; do ids="$ids,'$t'"; done
   ids="${ids#,}"
-  [ -z "$ids" ] && { echo "nothing to clean"; return; }
+  if [ -z "$ids" ]; then echo "nothing to clean"; CLEANUP_OK=1; else
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
     begin;
     -- retries reference the withdrawal they replace, so clear the links first
@@ -74,7 +79,13 @@ cleanup() {
       or settlement_id in (select id from cash_debts where transaction_id in ($ids));
     delete from cash_debts where transaction_id in ($ids);
     delete from transactions where id in ($ids);
-    commit;" && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
+    commit;" && CLEANUP_OK=1 && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
+  fi
+  if [ -n "$SETUP_FAILED" ]; then
+    echo "== RUN INVALID: setup step failed ($SETUP_FAILED). Checks after it prove nothing. =="; exit 1
+  fi
+  [ "$CLEANUP_OK" = 1 ] || { echo "== RUN FAILED: cleanup failed, test rows may be left in the database =="; exit 1; }
+  [ "$FAIL" -eq 0 ] && exit 0 || exit 1
 }
 
 echo "== Logging in fixtures =="
@@ -97,7 +108,7 @@ trap cleanup EXIT
 
 echo
 echo "== Setup: simulated M-Pesa sale, product 2000 + photo 10 (maker 1410, driver 600) =="
-TXN_ID=$(mpesa_sale "$PRODUCER_ID" 2000 10 "$DRIVER_ID") || exit 1
+TXN_ID=$(mpesa_sale "$PRODUCER_ID" 2000 10 "$DRIVER_ID"); need "simulated M-Pesa sale" "$TXN_ID"
 TXN_IDS+=("$TXN_ID")
 check "simulated callback confirmed the M-Pesa sale" "$(q "select status from transactions where id = '$TXN_ID';")" "confirmed"
 check "maker 1410 available" "$(q "select amount from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'maker' and status = 'available';")" "1410.00"
@@ -168,7 +179,7 @@ echo
 echo "== Test 6: unconfirmed cash past its deadline expires (rule 12) =="
 EXP=$(curl -s -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
   -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":100,\"photo_enabled\":true,\"photo_amount\":10,\"link_sig\":\"$(sig "$PRODUCER_ID" 100 10 "$DRIVER_QR")\"}")
-EXP_ID=$(echo "$EXP" | json "['id']")
+EXP_ID=$(echo "$EXP" | json "['id']"); need "cash sale to expire" "$EXP_ID"
 TXN_IDS+=("$EXP_ID")
 # Move the deadline into the past rather than waiting out the real 10-minute window.
 q "update transactions set confirmation_deadline = now() - interval '1 second' where id = '$EXP_ID';" >/dev/null

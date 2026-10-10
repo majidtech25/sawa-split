@@ -8,6 +8,13 @@ import { QR_OPTIONS } from "../lib/driverQr"
 import { ksh } from "../lib/format"
 import { supabase } from "../lib/supabase"
 
+// M-Pesa charges whole shillings, so a price with cents is refused here and by the API.
+function priceError(value) {
+  if (!value) return null
+  if (!/^\d+$/.test(value)) return "Whole shillings only, with no cents (for example 150, not 150.50)."
+  return null
+}
+
 const selectClass =
   "rounded-sawa border border-sawa-border bg-sawa-surface px-3 py-2.5 text-[15px] text-sawa-text outline-none focus:border-2 focus:border-sawa-green"
 
@@ -36,6 +43,8 @@ export default function PriceCardsPage() {
 
   const producer = producers.find((p) => p.id === producerId)
 
+  const [priceErrors, setPriceErrors] = useState({})
+
   async function generate(event) {
     event.preventDefault()
     setError(null)
@@ -44,6 +53,9 @@ export default function PriceCardsPage() {
       setError("Choose the maker this card is for.")
       return
     }
+    const errors = { product: priceError(product), photo: priceError(photo) }
+    setPriceErrors(errors)
+    if (errors.product || errors.photo) return
     setBusy(true)
     try {
       const result = await api("/admin/price-cards", {
@@ -87,10 +99,10 @@ export default function PriceCardsPage() {
           </select>
         </div>
         {producer?.charges_product && (
-          <Field id="card-product" label="Product price (KSh)" inputMode="numeric" value={product} onChange={(e) => setProduct(e.target.value.replace(/[^\d]/g, ""))} />
+          <Field id="card-product" label="Product price (KSh)" inputMode="numeric" value={product} onChange={(e) => setProduct(e.target.value.trim())} error={priceErrors.product} />
         )}
         {producer?.charges_photo && (
-          <Field id="card-photo" label="Photo consent price (KSh)" inputMode="numeric" value={photo} onChange={(e) => setPhoto(e.target.value.replace(/[^\d]/g, ""))} />
+          <Field id="card-photo" label="Photo consent price (KSh)" inputMode="numeric" value={photo} onChange={(e) => setPhoto(e.target.value.trim())} error={priceErrors.photo} />
         )}
         <div className="flex flex-col gap-1.5">
           <label htmlFor="card-driver" className="text-[13px] text-sawa-text-muted">Referring driver (optional)</label>

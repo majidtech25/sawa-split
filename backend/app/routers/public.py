@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import links
 from ..db import get_session
 from ..ledger import compute_split
-from .transactions import MIN_TRANSACTION_AMOUNT
+from .transactions import MIN_TRANSACTION_AMOUNT, require_whole_shillings
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -94,6 +94,7 @@ async def build_checkout(session: AsyncSession, producer_id: str, product, photo
 
     if product is None and photo is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "No price was given for the product or photo consent.")
+    require_whole_shillings(product, photo)
     if product is not None and not producer.charges_product:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This maker doesn't charge for a product.")
     if photo is not None and not producer.charges_photo:
