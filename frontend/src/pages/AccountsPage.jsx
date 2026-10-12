@@ -17,8 +17,10 @@ const ACTION_LABEL = {
   account_closed: "Account closed",
   suspended: "Suspended",
   unsuspended: "Unsuspended",
+  login_locked: "Login locked",
+  login_unlocked: "Login unlocked",
 }
-const TYPE_LABEL = { maker: "Maker", driver: "Driver" }
+const TYPE_LABEL = { maker: "Maker", driver: "Driver", coordinator: "Coordinator", unknown: "Unregistered phone", ip: "One IP address" }
 
 function Th({ children, right = false }) {
   return (
@@ -118,6 +120,35 @@ export default function AccountsPage() {
           </p>
         )}
       </div>
+
+      {data.lockouts.length > 0 && (
+        <section className="mt-6">
+          <h2 className="text-lg font-semibold">Login lockouts</h2>
+          <p className="mt-1 text-sm text-sawa-text-muted">
+            Locked after 5 wrong PINs for one phone, or 20 from one network, within 15 minutes. Each lifts by itself
+            after 15 minutes; Unlock lifts it now.
+          </p>
+          <ul className="mt-3 flex flex-col gap-2">
+            {data.lockouts.map((l) => (
+              <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 rounded-sawa border border-sawa-border bg-sawa-surface p-3 text-sm">
+                <span>
+                  {l.kind === "phone" ? (
+                    <>
+                      {l.name || "Unregistered phone"} <span className="font-mono text-sawa-text-muted">+{l.key}</span>
+                    </>
+                  ) : (
+                    <>
+                      Network <span className="font-mono text-sawa-text-muted">{l.key}</span>
+                    </>
+                  )}
+                  <span className="block text-xs text-sawa-text-muted">Locked until {eatDateTime(l.locked_until)}</span>
+                </span>
+                <RowAction onClick={() => start("unlock", l)}>Unlock</RowAction>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="mt-6">
         <h2 className="text-lg font-semibold">Closure requests</h2>
@@ -240,7 +271,13 @@ export default function AccountsPage() {
                   <Td mono>{eatDateTime(e.at)}</Td>
                   <Td className="whitespace-nowrap">{ACTION_LABEL[e.action] || e.action}</Td>
                   <Td>
-                    {e.party_name || "Unknown"} <span className="text-sawa-text-muted">({TYPE_LABEL[e.party_type]})</span>
+                    {e.party_name ? (
+                      <>
+                        {e.party_name} <span className="text-sawa-text-muted">({TYPE_LABEL[e.party_type]})</span>
+                      </>
+                    ) : (
+                      <span className="text-sawa-text-muted">{TYPE_LABEL[e.party_type] || e.party_type}</span>
+                    )}
                   </Td>
                   <Td className="whitespace-nowrap">
                     {e.actor_role === "system" ? "Automatic" : e.actor_role === "coordinator" ? "Coordinator" : TYPE_LABEL[e.actor_role]}
@@ -325,6 +362,23 @@ export default function AccountsPage() {
               className="rounded-sawa border border-sawa-border bg-sawa-surface px-3 py-2.5 font-mono text-[15px] outline-none focus:border-2 focus:border-sawa-green"
             />
           </div>
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={action?.kind === "unlock"}
+        title="Unlock this login?"
+        confirmLabel="Unlock"
+        onClose={close}
+        onConfirm={async () => {
+          await api(`/admin/login-lockouts/${row.id}/clear`, { method: "POST", auth: true, body: { reason: reason.trim() || null } })
+          setNotice(row.kind === "phone" ? `${row.name || "That phone"} can log in again.` : "That network can log in again.")
+          await load()
+        }}
+      >
+        <p>Its wrong-PIN count is cleared too, so the next correct PIN logs straight in. This is recorded in the audit log.</p>
+        <div className="mt-3 text-sawa-text">
+          <TextArea id="unlock-reason" label="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} />
         </div>
       </ConfirmDialog>
 

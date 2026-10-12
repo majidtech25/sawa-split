@@ -51,7 +51,9 @@ CLEANUP_OK=0
 need() { [ -n "$2" ] && return 0; SETUP_FAILED="$1"; echo "FATAL: setup step failed: $1" >&2; exit 1; }
 check() {
   local desc="$1" actual="$2" expected="$3"
-  if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
+  if [ -z "$actual" ] && [ -z "$expected" ]; then
+    echo "FAIL  $desc (both sides empty: a call failed)"; FAIL=$((FAIL+1))
+  elif [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
   else echo "FAIL  $desc (expected '$expected', got '$actual')"; FAIL=$((FAIL+1)); fi
 }
 wait_for() {

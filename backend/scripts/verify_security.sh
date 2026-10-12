@@ -42,7 +42,9 @@ CLEANUP_OK=0
 need() { [ -n "$2" ] && return 0; SETUP_FAILED="$1"; echo "FATAL: setup step failed: $1" >&2; exit 1; }
 check() {
   local desc="$1" actual="$2" expected="$3"
-  if [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
+  if [ -z "$actual" ] && [ -z "$expected" ]; then
+    echo "FAIL  $desc (both sides empty: a call failed)"; FAIL=$((FAIL+1))
+  elif [ "$actual" = "$expected" ]; then echo "PASS  $desc"; PASS=$((PASS+1))
   else echo "FAIL  $desc (expected '$expected', got '$actual')"; FAIL=$((FAIL+1)); fi
 }
 login() {
@@ -87,6 +89,8 @@ cleanup() {
       or settlement_id in (select id from cash_debts where transaction_id in ($ids));
     delete from cash_debts where transaction_id in ($ids);
     delete from transactions where id in ($ids);
+    delete from login_failures where at >= '$STARTED_AT';
+    delete from login_lockouts where created_at >= '$STARTED_AT';
     commit;" && CLEANUP_OK=1 && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
   fi
   if [ -n "$SETUP_FAILED" ]; then
@@ -107,6 +111,7 @@ DRIVER_ID=$(echo "$DRIVER_LOGIN" | json "['driver_id']")
 [ -n "$MAKER" ] && [ -n "$DRIVER" ] && [ -n "$COORD_TOKEN" ] && [ -n "$SB_URL" ] && [ -n "$SB_KEY" ] || { echo "FATAL: could not log in the fixtures or read frontend/.env."; exit 1; }
 BUSY=$(q "select count(*) from wallet_ledger_entries where recipient_id in ('$PRODUCER_ID','$DRIVER_ID') and status in ('pending','available','frozen')")
 [ "$BUSY" = "0" ] || { echo "FATAL: the fixtures already hold a balance; this script needs them at zero."; exit 1; }
+STARTED_AT=$(q "select now();")
 trap cleanup EXIT
 
 # One real sale of the maker's own, so updates have a row they could otherwise reach.
@@ -119,11 +124,11 @@ BEFORE=$(q "select md5(string_agg(t::text, '|' order by t::text)) from (
 
 echo
 echo "== Test 1: no browser writes, to any table =="
-TABLES="transactions wallet_ledger_entries withdrawal_requests cash_debts producers drivers closure_requests account_suspensions account_audit_log auth_credentials transaction_secrets stk_verifications sync_queue_items"
+TABLES="transactions wallet_ledger_entries withdrawal_requests cash_debts producers drivers closure_requests account_suspensions account_audit_log auth_credentials transaction_secrets stk_verifications sync_queue_items login_failures login_lockouts"
 key_of() { case $1 in transaction_secrets|stk_verifications) echo transaction_id ;; auth_credentials) echo auth_user_id ;; *) echo id ;; esac; }
 # The column a PATCH tries to set: the key, except the audit log's generated identity id,
 # which Postgres refuses to set before it even checks permissions (428C9).
-set_of() { [ "$1" = account_audit_log ] && echo reason || key_of "$1"; }
+set_of() { case $1 in account_audit_log) echo reason ;; login_failures) echo phone ;; login_lockouts) echo key ;; *) key_of "$1" ;; esac; }
 for label in maker driver coordinator anonymous; do
   case $label in maker) jwt="$MAKER" ;; driver) jwt="$DRIVER" ;; coordinator) jwt="$COORD_TOKEN" ;; *) jwt="anon" ;; esac
   fails_before=$FAIL
@@ -140,7 +145,7 @@ for label in maker driver coordinator anonymous; do
       fi
     done
   done
-  [ "$FAIL" -eq "$fails_before" ] && { echo "PASS  $label: insert, update and delete refused on all 13 tables"; PASS=$((PASS+1)); }
+  [ "$FAIL" -eq "$fails_before" ] && { echo "PASS  $label: insert, update and delete refused on all 15 tables"; PASS=$((PASS+1)); }
 done
 refused "maker can't change their own account_status" "$(rest PATCH "producers?id=eq.$PRODUCER_ID" "$MAKER" '{"account_status":"active"}')"
 refused "maker can't change their own split percentage" "$(rest PATCH "producers?id=eq.$PRODUCER_ID" "$MAKER" '{"default_split_driver_pct":0}')"
@@ -273,8 +278,10 @@ check "enforce: Safaricom never answers -> still verifying, unanswered, nobody c
 check "enforce: Safaricom says no -> failed, nobody credited" "$R3 $S3" "mismatch failed mismatch 0"
 RECON=$(curl -s -m 60 "$BASE_URL/admin/reconciliation" -H "Authorization: Bearer $COORD_TOKEN")
 check "the coordinator sees the unanswered sale as 'Payment being verified'" "$(echo "$RECON" | python3 -c "import json,sys; print(any(c['transaction_id']=='$E2_ID' and c['transaction_status']=='verifying' and c['state']=='unanswered' for c in json.load(sys.stdin)['payment_checks']))")" "True"
+# Both sides come from API calls; an empty value means a call failed, never a pass.
+EXPECTED_COLLECTED=$(python3 -c "from decimal import Decimal as D; print(D('$COLLECTED_BEFORE') + 100)" 2>/dev/null)
 check "collected counts only the confirmed one (+100), not the verifying or failed ones" \
-  "$(echo "$RECON" | json "['totals']['collected']")" "$(python3 -c "from decimal import Decimal as D; print(D('$COLLECTED_BEFORE') + 100)")"
+  "$(echo "$RECON" | json "['totals']['collected']")" "${EXPECTED_COLLECTED:-<reconciliation call failed>}"
 for i in 1 2 3 4; do  # a sandbox 429 or a stalled DB connection is "try again", as a coordinator would
   CHECK=$(curl -s -m 150 -X POST "$BASE_URL/admin/transactions/$E2_ID/check-payment" -H "Authorization: Bearer $COORD_TOKEN")
   [ "$(echo "$CHECK" | json "['state']")" = "mismatch" ] && break
@@ -282,6 +289,55 @@ for i in 1 2 3 4; do  # a sandbox 429 or a stalled DB connection is "try again",
 done
 check "coordinator's Check again asks Safaricom: no such payment -> failed, nobody credited" \
   "$(echo "$CHECK" | json "['state']") $(echo "$CHECK" | json "['transaction_status']") $(q "select count(*) from wallet_ledger_entries where transaction_id = '$E2_ID';")" "mismatch failed 0"
+
+echo
+echo "== Test 5: login attempt limits =="
+# attempt <phone> <pin> -> "<http code> <detail or role>", no retries (each attempt counts)
+attempt() {
+  curl -s -m 60 -w '\n%{http_code}' -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "{\"phone\":\"$1\",\"pin\":\"$2\"}" \
+    | python3 -c "import json,sys; b,c=sys.stdin.read().rsplit('\n',1); d=json.loads(b) if b.strip().startswith('{') else {}; print(c, d.get('role') or d.get('detail') or b[:60])"
+}
+fails() { for i in $(seq 1 "$3"); do attempt "$1" "$2" >/dev/null; done; }
+UNK="+254700000101"
+WRONG_REAL=$(attempt "$DRIVER_PHONE" 0000); WRONG_UNKNOWN=$(attempt "$UNK" 0000)
+check "a wrong PIN and an unregistered phone get the same answer" "$WRONG_REAL / $WRONG_UNKNOWN" "401 Invalid phone or PIN / 401 Invalid phone or PIN"
+fails "$UNK" 0000 4
+check "an unregistered phone locks after 5 failures, with the plain message" "$(attempt "$UNK" 0000)" "429 Too many attempts, try again in 15 minutes."
+fails "$DRIVER_PHONE" 0000 3
+check "4 failures, then the right PIN still logs in" "$(attempt "$DRIVER_PHONE" "$DRIVER_PIN")" "200 driver"
+fails "$DRIVER_PHONE" 0000 4
+check "...because success cleared the counter: 4 more failures and the right PIN works again" "$(attempt "$DRIVER_PHONE" "$DRIVER_PIN")" "200 driver"
+fails "$DRIVER_PHONE" 0000 5
+check "5 failures lock a registered phone: even the right PIN is refused" "$(attempt "$DRIVER_PHONE" "$DRIVER_PIN")" "429 Too many attempts, try again in 15 minutes."
+check "a locked registered phone and a locked unregistered one look identical" "$(attempt "$DRIVER_PHONE" 0000)" "$(attempt "$UNK" 0000)"
+check "...and so does the same phone typed another way (07...)" "$(attempt "0799999003" "$DRIVER_PIN" | cut -d' ' -f1)" "429"
+check "each lockout is in the audit log (the driver's and the unregistered phone's)" \
+  "$(q "select string_agg(party_type, ',' order by party_type) from account_audit_log where action = 'login_locked' and at >= '$STARTED_AT';")" "driver,unknown"
+LOCK_ID=$(curl -s -m 60 "$BASE_URL/admin/accounts" -H "Authorization: Bearer $COORD_TOKEN" \
+  | python3 -c "import json,sys; print(next((l['id'] for l in json.load(sys.stdin).get('lockouts', []) if l['kind'] == 'phone' and l['key'] == '254799999003'), ''))")
+check "the coordinator's Accounts list shows the driver's lockout" "$([ -n "$LOCK_ID" ] && echo listed || echo missing)" "listed"
+check "a maker can't unlock it (403)" "$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST "$BASE_URL/admin/login-lockouts/$LOCK_ID/clear" -H "Authorization: Bearer $MAKER" -H "Content-Type: application/json" -d '{}')" "403"
+check "the coordinator's Unlock ends it" "$(curl -s -m 60 -X POST "$BASE_URL/admin/login-lockouts/$LOCK_ID/clear" -H "Authorization: Bearer $COORD_TOKEN" -H "Content-Type: application/json" -d '{"reason":"[test] presenter locked out"}' | json "['lockouts_ended']")" "1"
+check "...and the right PIN logs straight in" "$(attempt "$DRIVER_PHONE" "$DRIVER_PIN")" "200 driver"
+check "the unlock is in the audit log, with who and why" \
+  "$(q "select actor_role || ' ' || (actor_phone is not null) || ' ' || reason from account_audit_log where action = 'login_unlocked' and at >= '$STARTED_AT';")" "coordinator true [test] presenter locked out"
+# The IP the API records for this script (127.0.0.1 locally); top its failures up to exactly 20.
+IP_SEEN=$(q "select ip from login_failures where at >= '$STARTED_AT' order by at desc limit 1;")
+NEEDED=$(( 20 - $(q "select count(*) from login_failures where ip = '$IP_SEEN' and at > now() - interval '15 minutes';") ))
+for i in $(seq 1 "$NEEDED"); do attempt "+2547000002$(printf %02d "$i")" 0000 >/dev/null; done
+check "20 failures from one IP lock that IP: a fresh phone is refused" "$(attempt "+254700000299" 0000 | cut -d' ' -f1)" "429"
+check "...even the coordinator with the right PIN" "$(attempt "$COORDINATOR_PHONE" "$COORDINATOR_PIN" | cut -d' ' -f1)" "429"
+check "the IP lockout is in the audit log too" "$(q "select count(*) from account_audit_log where action = 'login_locked' and party_type = 'ip' and at >= '$STARTED_AT';")" "1"
+check "the terminal script clears an IP lockout" \
+  "$(.venv/bin/python scripts/clear_login_lockout.py --env-file .env --ip "$IP_SEEN" 2>/dev/null | grep -o 'unlocked')" "unlocked"
+check "...and the coordinator can log in again" "$(attempt "$COORDINATOR_PHONE" "$COORDINATOR_PIN")" "200 coordinator"
+q "update login_lockouts set locked_until = now() - interval '1 second' where created_at >= '$STARTED_AT';" >/dev/null
+check "once the 15 minutes are up, an unregistered phone's lock is gone too" "$(attempt "$UNK" 0000)" "401 Invalid phone or PIN"
+OLD_HASH=$(PYTHONPATH=. .venv/bin/python -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(rounds=12)).decode())" "$DRIVER_PIN")
+q "update auth_credentials set pin_hash = '$OLD_HASH' where phone = '$DRIVER_PHONE';" >/dev/null
+check "a PIN stored at bcrypt cost 12 still logs in" "$(attempt "$DRIVER_PHONE" "$DRIVER_PIN")" "200 driver"
+check "...and is re-hashed at cost 10 on that login" "$(q "select substr(pin_hash, 1, 7) from auth_credentials where phone = '$DRIVER_PHONE';")" '$2b$10$'
+refused "the browser can't read login failures" "$(rest GET "login_failures?select=*" "$COORD_TOKEN")"
 
 echo
 echo "== Summary: $PASS passed, $FAIL failed =="

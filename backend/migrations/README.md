@@ -70,3 +70,8 @@ and `tourist_confirm_token` move to `transaction_secrets` (unreadable from the
 browser, not in Realtime). It also adds the `verifying` status and
 `stk_verifications` for STK Push Query (`STK_QUERY_MODE`). Proven by
 `scripts/verify_security.sh`.
+
+0013 adds login attempt limiting (CLAUDE.md section 5): `login_failures` and
+`login_lockouts` (5 failures per phone or 20 per IP in 15 minutes lock it for 15
+minutes), and lets `account_audit_log` record `login_locked` for coordinators,
+unregistered phones and IPs. Proven by `scripts/verify_security.sh` Test 5.

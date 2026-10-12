@@ -205,6 +205,20 @@ actor_id    uuid, actor_phone text,        -- who
 reason      text,                          -- why
 details     jsonb not null default '{}'
 
+-- login_failures   (migration 0013, section 5: failed logins, pruned after a day)
+id    bigint generated always as identity primary key,
+phone text not null,                       -- normalised 254XXXXXXXXX, registered or not
+ip    text not null,
+at    timestamptz not null default now()
+
+-- login_lockouts   (migration 0013: one row per lockout; in force while locked_until > now())
+id           bigint generated always as identity primary key,
+kind         text not null check (kind in ('phone','ip')),
+key          text not null,
+locked_until timestamptz not null,
+created_at   timestamptz not null default now()
+-- account_audit_log also gains action 'login_locked' (party_type maker/driver/coordinator/unknown/ip, party_id nullable)
+
 -- sync_queue_items   (true offline/no-connectivity capture — a still-unbuilt future concern,
 -- distinct from cash-payment tracking, which now lives directly in `transactions` above via
 -- payment_method + the cash_* statuses. Do not repurpose this table for cash — it's for the
@@ -258,10 +272,18 @@ Storage: one Supabase Storage bucket, `qr-codes` — public read, coordinator-on
 Four roles, no public self-registration:
 
 - **Tourist** — no account. The public pay-initiate endpoint is the only surface, rate-limited per phone number. Cash Case B confirmation (rule 12) also needs no login — use a short-lived signed token tied to the transaction id, delivered via whatever already shows the tourist the price-transparency card (an in-page "I paid" button if she's still on the payment screen, or an SMS link if not). Do not require Supabase Auth for this — it would contradict "no account for tourists."
-- **Producer / Driver** — coordinator-onboarded via Supabase Auth's admin API, phone number as identifier + a 4-digit PIN issued in person. Logs in with phone + PIN. Cash-confirmation taps (rule 12, Case A/B for maker; Case A for driver) happen from their authenticated dashboard session. A suspended or closed account (rule 17) is refused at login and on every API call, with the reason; a closed one is also banned in Supabase Auth.
+- **Producer / Driver** — coordinator-onboarded via Supabase Auth's admin API, phone number as identifier + a 4-digit PIN issued in person. Logs in with phone + PIN (login limits below). Cash-confirmation taps (rule 12, Case A/B for maker; Case A for driver) happen from their authenticated dashboard session. A suspended or closed account (rule 17) is refused at login and on every API call, with the reason; a closed one is also banned in Supabase Auth.
 - **Coordinator/Admin** — same Supabase Auth mechanism, account carries an `is_admin` claim.
 
 Enforced twice: Supabase Row Level Security at the data layer, FastAPI endpoint checks at the API layer. **The browser never writes to the database, for any role** *(migration 0012, 2026-10-09)*. The browser roles `anon` and `authenticated` hold SELECT and nothing else on every table, and there are no write policies at all. So no browser (maker, driver, coordinator or tourist) can insert, update or delete a row, whatever it sends with the Publishable key. Every change, including every coordinator action, goes through the FastAPI endpoints, which check who's calling and write with their own direct connection. That connection is the only writer, and its credentials and the Secret key are never exposed to the frontend. Default privileges keep any future table the same; `scripts/verify_security.sh` checks all of it.
+
+**Login attempt limiting** *(migration 0013, 2026-10-11)*. A 4-digit PIN has only 10,000 values, so `POST /auth/login` enforces limits, stored in the database (`login_failures`, `login_lockouts`) because Render's free instance restarts on wake. Implemented in `app/login_limits.py`:
+- **Per phone:** 5 failed attempts within 15 minutes lock that phone for 15 minutes. The phone is normalised, so `+2547…`, `2547…` and `07…` count as one.
+- **Per IP:** 20 failures within 15 minutes lock that IP, so one person can't spray guesses across many phones. On Render the IP comes from Cloudflare's `CF-Connecting-IP`, which the client can't set.
+- **While locked:** the PIN isn't even checked. The answer is a plain 429, "Too many attempts, try again in 15 minutes."
+- **Same answer either way:** a wrong PIN and an unregistered phone get the same "Invalid phone or PIN", and an unregistered phone still costs a full bcrypt check, so neither the message nor the timing reveals which phones exist.
+- **Counters and audit:** a successful login clears that phone's failures. Every lockout is written to `account_audit_log` (`login_locked`).
+- **bcrypt:** cost 10, and the checks run in a worker thread, not on the event loop. A PIN stored at another cost is re-hashed after its next successful login.
 
 Two columns are secret even from their owners: `checkout_request_id` (it would let someone aim a forged STK callback) and `tourist_confirm_token`. They live in `transaction_secrets`, which no browser role can read and Realtime doesn't stream. `auth_credentials` is likewise unreadable.
 
@@ -352,7 +374,7 @@ Production Daraja B2C approval (parallel-tracked, not a blocker for sandbox demo
 
 ## 11. Environment variables (names only — values come from where you saved them, never from this chat)
 
-Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), `DATABASE_URL` (asyncpg, `ssl=True` not `"require"`), `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_B2C_SHORTCODE`, `DARAJA_INITIATOR_NAME`, `DARAJA_SECURITY_CREDENTIAL`, `DARAJA_CALLBACK_BASE_URL`, `CORS_ORIGINS` (comma-separated frontend URLs allowed to call the API; defaults to the local Vite dev server), `CHECKOUT_LINK_SECRET` (HMAC key that signs price-card links and, under its own label, each STK Push's callback URL, `app/links.py`; every printed card and the demo link are signed with it, so use the same value everywhere the API runs, and expect every card to stop working if it changes), `STK_QUERY_MODE` (`flag` or `enforce`, default `flag`: how STK Push Query verification gates crediting, section 6 step 2. **Production must set `enforce`**), `CASH_CONFIRM_WINDOW_MINUTES` (default 10 — kept as an env var, not a hardcoded constant, since the right window is genuinely unknown until Phase 0/1 field testing).
+Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), `DATABASE_URL` (asyncpg, `ssl=True` not `"require"`), `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_B2C_SHORTCODE`, `DARAJA_INITIATOR_NAME`, `DARAJA_SECURITY_CREDENTIAL`, `DARAJA_CALLBACK_BASE_URL`, `CORS_ORIGINS` (comma-separated frontend URLs allowed to call the API; defaults to the local Vite dev server), `CHECKOUT_LINK_SECRET` (HMAC key that signs price-card links and, under its own label, each STK Push's callback URL, `app/links.py`; every printed card and the demo link are signed with it, so use the same value everywhere the API runs, and expect every card to stop working if it changes), `HEALTH_TIMING_KEY` (optional secret: sent as the `X-Health-Timing-Key` header, it unlocks `GET /health`'s full timings; empty disables them, and the public `/health` stays a cheap database check), `STK_QUERY_MODE` (`flag` or `enforce`, default `flag`: how STK Push Query verification gates crediting, section 6 step 2. **Production must set `enforce`**), `CASH_CONFIRM_WINDOW_MINUTES` (default 10 — kept as an env var, not a hardcoded constant, since the right window is genuinely unknown until Phase 0/1 field testing).
 Frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_API_BASE_URL` (the backend's URL), `VITE_PUBLIC_APP_URL` (the frontend's own public URL, encoded into every printed QR: driver cards and price cards; unset, it falls back to whatever URL the coordinator's browser is on, so set it to the Render URL in Stage 9 and then re-run `frontend/scripts/regenerate-driver-qrs.mjs` so existing driver cards point there too).
 
 Set these as a Render Environment Group once the two Web Services exist (deferred from Phase G on purpose) — never commit them to the repo.

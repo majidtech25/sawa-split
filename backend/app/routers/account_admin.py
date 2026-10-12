@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import lifecycle, payouts
+from .. import lifecycle, login_limits, payouts
 from ..db import get_session
 from ..ledger import payable_balance, settle_debts
 from ..security import require_admin
@@ -67,12 +67,20 @@ class AuditRow(BaseModel):
     id: int
     at: str
     action: str
-    party_type: str
-    party_id: str
+    party_type: str             # maker, driver, or for a login lockout coordinator/unknown/ip
+    party_id: str | None
     party_name: str | None
     actor_role: str
     actor_phone: str | None
     reason: str | None
+
+
+class Lockout(BaseModel):
+    id: int
+    kind: str                   # 'phone' or 'ip'
+    key: str                    # the phone (254XXXXXXXXX) or the IP
+    name: str | None            # whose phone, if it's registered
+    locked_until: str
 
 
 class AccountsResponse(BaseModel):
@@ -80,6 +88,7 @@ class AccountsResponse(BaseModel):
     closure_requests: list[ClosureRow]
     audit: list[AuditRow]
     overdue_reviews: int
+    lockouts: list[Lockout]     # login lockouts in force now (section 5)
 
 
 @router.get("/accounts", response_model=AccountsResponse)
@@ -147,13 +156,21 @@ async def accounts(
         closure_requests=closures,
         audit=[
             AuditRow(
-                id=a.id, at=a.at.isoformat(), action=a.action, party_type=a.party_type, party_id=str(a.party_id),
+                id=a.id, at=a.at.isoformat(), action=a.action, party_type=a.party_type,
+                party_id=str(a.party_id) if a.party_id else None,
                 party_name=names[(a.party_type, a.party_id)].name if (a.party_type, a.party_id) in names else None,
                 actor_role=a.actor_role, actor_phone=a.actor_phone, reason=a.reason,
             )
             for a in audit
         ],
         overdue_reviews=sum(1 for a in account_rows if a.suspension and a.suspension.overdue),
+        lockouts=[
+            Lockout(
+                id=l.id, kind=l.kind, key=l.key, locked_until=l.locked_until.isoformat(),
+                name=next((p.name for p in parties if l.kind == "phone" and login_limits.phone_key(p.phone) == l.key), None),
+            )
+            for l in await login_limits.active_lockouts(session)
+        ],
     )
 
 
@@ -403,3 +420,36 @@ async def unsuspend(
     )
     await session.commit()
     return SuspensionState(party_type=party_type, id=party_id, account_status="active", suspension=None)
+
+
+# --- Login lockouts -------------------------------------------------------------------
+
+
+class UnlockBody(BaseModel):
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class UnlockResult(BaseModel):
+    kind: str
+    key: str
+    lockouts_ended: int
+
+
+@router.post("/login-lockouts/{lockout_id}/clear", response_model=UnlockResult)
+async def clear_login_lockout(
+    lockout_id: int,
+    body: UnlockBody,
+    admin: Annotated[dict[str, Any], Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> UnlockResult:
+    """Ends a login lockout before its 15 minutes are up (section 5) and clears that
+    phone's or IP's failed attempts. Audit-logged as login_unlocked, with who and why."""
+    lockout = (
+        await session.execute(text("select kind, key from login_lockouts where id = :id"), {"id": lockout_id})
+    ).one_or_none()
+    if lockout is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such lockout.")
+    ended = await login_limits.clear_lockouts(
+        session, lockout.kind, lockout.key, **_actor(admin), reason=(body.reason or "").strip() or None
+    )
+    return UnlockResult(kind=lockout.kind, key=lockout.key, lockouts_ended=ended)

@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from . import payouts, verification
+from . import login_limits, payouts, verification
 
 log = logging.getLogger("sawa.scheduler")
 
@@ -32,5 +32,10 @@ def build_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(
         verification.run_due_checks, IntervalTrigger(seconds=20),
         id="stk_push_query", coalesce=True, max_instances=1,
+    )
+    # Section 5: old login failures can't affect a lockout any more.
+    scheduler.add_job(
+        login_limits.prune, IntervalTrigger(hours=1),
+        id="prune_login_failures", coalesce=True, max_instances=1,
     )
     return scheduler

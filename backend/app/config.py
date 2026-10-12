@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     #             "Payment being verified" and nobody is credited. PRODUCTION MUST USE THIS.
     stk_query_mode: Literal["flag", "enforce"] = "flag"
 
+    # Unlocks GET /health's full timings (send it as the X-Health-Timing-Key header).
+    # Empty disables them; the public /health stays a cheap database check.
+    health_timing_key: str = ""
+
     # Comma-separated browser origins allowed to call the API (the frontend's URL).
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

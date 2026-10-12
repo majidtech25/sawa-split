@@ -1,14 +1,14 @@
 import secrets
 from typing import Annotated, Any, Literal, Union
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import lifecycle, supabase_auth
+from .. import lifecycle, login_limits, supabase_auth
 from ..db import get_session
-from ..pin import hash_pin, verify_pin
+from ..pin import hash_pin_async, needs_rehash, verify_pin_async
 from ..security import require_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -73,7 +73,7 @@ async def _create_auth_account(session: AsyncSession, *, phone: str, pin: str, i
             {
                 "auth_user_id": auth_user_id,
                 "phone": phone,
-                "pin_hash": hash_pin(pin),
+                "pin_hash": await hash_pin_async(pin),
                 "auth_password": auth_password,
             },
         )
@@ -162,16 +162,32 @@ class LoginResponse(BaseModel):
 
 @router.post("/login", response_model=LoginResponse)
 async def login(
-    body: LoginRequest, session: Annotated[AsyncSession, Depends(get_session)]
+    body: LoginRequest, request: Request, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> LoginResponse:
+    # Attempt limiting (app/login_limits.py): a locked phone or IP is refused before the
+    # PIN is checked, with the same answer whether or not the phone is registered.
+    phone, ip = login_limits.phone_key(body.phone), login_limits.client_ip(request)
+    if await login_limits.is_locked(session, phone, ip):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, login_limits.LOCKED_MESSAGE)
+
     credentials = (
         await session.execute(
-            text("select pin_hash, auth_password from auth_credentials where phone = :phone"),
+            text("select auth_user_id, pin_hash, auth_password from auth_credentials where phone = :phone"),
             {"phone": body.phone},
         )
     ).one_or_none()
-    if credentials is None or not verify_pin(body.pin, credentials.pin_hash):
+    # An unknown phone still costs a full PIN check, so timing doesn't reveal it either.
+    if not await verify_pin_async(body.pin, credentials.pin_hash if credentials else None):
+        await login_limits.record_failure(session, phone, ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid phone or PIN")
+    await login_limits.clear_failures(session, phone)
+    if needs_rehash(credentials.pin_hash):
+        # Re-made at the current bcrypt cost (app/pin.py) now that we know the PIN.
+        await session.execute(
+            text("update auth_credentials set pin_hash = :h where auth_user_id = :id"),
+            {"h": await hash_pin_async(body.pin), "id": credentials.auth_user_id},
+        )
+        await session.commit()
 
     # Rule 17: a suspended or closed maker/driver can't log in, and is told why. Checked
     # only after the PIN, so a wrong PIN learns nothing about the account.
