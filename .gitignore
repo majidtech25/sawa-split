@@ -221,3 +221,4 @@ __marimo__/
 
 # Windows download metadata (WSL)
 *:Zone.Identifier
+*.local.md

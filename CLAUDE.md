@@ -24,6 +24,7 @@ You are the engineer implementing this MVP. Treat section 4 (business rules) and
 - **Don't restyle.** Use the exact tokens in section 7. If a screen needs something the tokens don't cover, ask, don't improvise a new color or a second radius.
 - **Don't skip the build stages below out of order** (same discipline the planning phase used) — each stage should be working and committed before the next one starts, so a demo is always possible from wherever the build currently stands, not just at the very end.
 - **Prefer boring and correct over clever.** This is a payments ledger for real people's earnings — the append-only ledger, the idempotency keys, and the full-balance-only withdrawal rule all exist specifically to remove entire classes of bugs; don't "simplify" them back in. The cash dual-confirmation flow (section 4 rule 12) exists for the same reason — don't collapse it back into a single self-reported log.
+- **No AI attribution in commits or PRs.** Commit messages and PR descriptions carry no `Co-Authored-By` line and no Claude/AI attribution of any kind. `.claude/settings.local.json` sets `"includeCoAuthoredBy": false` (that file is git-ignored, so set it again on a new machine).
 - **Ask before touching anything in section 4, 5, or 6** — those are the parts a judge's Q&A will actually probe.
 
 ## 1. Stack (reused from a prior project, "Operix" — proven, not novel)
