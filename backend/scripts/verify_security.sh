@@ -89,6 +89,9 @@ cleanup() {
       or settlement_id in (select id from cash_debts where transaction_id in ($ids));
     delete from cash_debts where transaction_id in ($ids);
     delete from transactions where id in ($ids);
+    update withdrawal_requests set retry_of = null where requested_at >= '$STARTED_AT';
+    delete from withdrawal_requests where requested_at >= '$STARTED_AT';
+    delete from payout_pauses where paused_at >= '$STARTED_AT';
     delete from login_failures where at >= '$STARTED_AT';
     delete from login_lockouts where created_at >= '$STARTED_AT';
     commit;" && CLEANUP_OK=1 && echo "cleanup ok" || echo "cleanup FAILED — test rows may still be present"
@@ -112,6 +115,14 @@ DRIVER_ID=$(echo "$DRIVER_LOGIN" | json "['driver_id']")
 BUSY=$(q "select count(*) from wallet_ledger_entries where recipient_id in ('$PRODUCER_ID','$DRIVER_ID') and status in ('pending','available','frozen')")
 [ "$BUSY" = "0" ] || { echo "FATAL: the fixtures already hold a balance; this script needs them at zero."; exit 1; }
 STARTED_AT=$(q "select now();")
+# Fresh logins at the start of each section: on a slow link a full run can outlast the
+# one-hour session tokens (PostgREST then answers PGRST303, JWT expired).
+refresh_tokens() {
+  local p d c
+  p=$(login "$PRODUCER_PHONE" "$PRODUCER_PIN"); d=$(login "$DRIVER_PHONE" "$DRIVER_PIN"); c=$(login "$COORDINATOR_PHONE" "$COORDINATOR_PIN")
+  MAKER=$(echo "$p" | json "['access_token']"); DRIVER=$(echo "$d" | json "['access_token']"); COORD_TOKEN=$(echo "$c" | json "['access_token']")
+  need "fresh logins" "$MAKER"; need "fresh logins" "$DRIVER"; need "fresh logins" "$COORD_TOKEN"
+}
 trap cleanup EXIT
 
 # One real sale of the maker's own, so updates have a row they could otherwise reach.
@@ -175,6 +186,7 @@ check "no write policy is left on any table" "$(q "select count(*) from pg_polic
 
 echo
 echo "== Test 2: the secrets can't be read from the browser, Realtime included =="
+refresh_tokens
 check "transactions has no checkout_request_id or tourist_confirm_token column any more" \
   "$(q "select count(*) from information_schema.columns where table_name = 'transactions' and column_name in ('checkout_request_id','tourist_confirm_token');")" "0"
 refused "maker can't read transaction_secrets" "$(rest GET "transaction_secrets?select=*" "$MAKER")"
@@ -188,6 +200,7 @@ check "Realtime streams no table that holds a secret" \
 
 echo
 echo "== Test 3: forged STK callbacks =="
+refresh_tokens
 SALE=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 200 -)
 F_ID=$(echo "$SALE" | json "['id']"); need "sale to forge callbacks against" "$F_ID"; TXN_IDS+=("$F_ID")
 F_CRID=$(echo "$SALE" | json "['checkout_request_id']"); F_TOKEN=$(echo "$SALE" | json "['callback_token']")
@@ -213,6 +226,7 @@ check "a non-coordinator can't trigger a check (403)" "$(curl -s -o /dev/null -w
 
 echo
 echo "== Test 4: STK_QUERY_MODE=enforce =="
+refresh_tokens
 COLLECTED_BEFORE=$(curl -s -m 60 "$BASE_URL/admin/reconciliation" -H "Authorization: Bearer $COORD_TOKEN" | json "['totals']['collected']")
 E1=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E1_ID=$(echo "$E1" | json "['id']"); need "enforce-mode sale 1" "$E1_ID"; TXN_IDS+=("$E1_ID")
 E2=$(PYTHONPATH=. .venv/bin/python scripts/simulate_mpesa_sale.py "$PRODUCER_ID" 100 -); E2_ID=$(echo "$E2" | json "['id']"); need "enforce-mode sale 2" "$E2_ID"; TXN_IDS+=("$E2_ID")
@@ -292,6 +306,7 @@ check "coordinator's Check again asks Safaricom: no such payment -> failed, nobo
 
 echo
 echo "== Test 5: login attempt limits =="
+refresh_tokens
 # attempt <phone> <pin> -> "<http code> <detail or role>", no retries (each attempt counts)
 attempt() {
   curl -s -m 60 -w '\n%{http_code}' -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "{\"phone\":\"$1\",\"pin\":\"$2\"}" \
@@ -338,6 +353,46 @@ q "update auth_credentials set pin_hash = '$OLD_HASH' where phone = '$DRIVER_PHO
 check "a PIN stored at bcrypt cost 12 still logs in" "$(attempt "$DRIVER_PHONE" "$DRIVER_PIN")" "200 driver"
 check "...and is re-hashed at cost 10 on that login" "$(q "select substr(pin_hash, 1, 7) from auth_credentials where phone = '$DRIVER_PHONE';")" '$2b$10$'
 refused "the browser can't read login failures" "$(rest GET "login_failures?select=*" "$COORD_TOKEN")"
+
+echo
+echo "== Test 6: payout safety (no real B2C is sent) =="
+refresh_tokens
+GUARD=$(PYTHONPATH=. .venv/bin/python - "$DRIVER_PHONE" <<'PY'
+import asyncio, sys
+import httpx
+from app import daraja
+sent = []
+async def no_network(self, *a, **k):
+    sent.append(a)
+    raise AssertionError("a request was sent")
+httpx.AsyncClient.post = no_network
+httpx.AsyncClient.get = no_network
+async def main():
+    try:
+        await daraja.b2c_payment(phone=sys.argv[1], amount=600, remarks="t", occasion="t", result_url="x", timeout_url="x", originator_conversation_id="t")
+        print("sent")
+    except daraja.SandboxRecipientRefused:
+        print(f"refused, {len(sent)} requests")
+asyncio.run(main())
+PY
+)
+check "a sandbox B2C to the driver's number is refused before any request (not even a token fetch)" "$GUARD" "refused, 0 requests"
+P_SALE=$(mpesa_sale "$PRODUCER_ID" 1000 -); need "producer M-Pesa sale for the pause test" "$P_SALE"; TXN_IDS+=("$P_SALE")
+KEY=$(python3 -c "import uuid; print(uuid.uuid4())")
+W_ID=$(q "insert into withdrawal_requests (recipient_type, recipient_id, amount, idempotency_key, status) values ('maker', '$PRODUCER_ID', 1000, '$KEY', 'processing') returning id;" | head -1)
+need "a payout in flight to fail" "$W_ID"
+curl -s -m 60 -X POST "$BASE_URL/daraja/b2c-callback" -H "Content-Type: application/json" \
+  -d "{\"Result\": {\"ResultCode\": 8006, \"ResultDesc\": \"The security credential is locked.\", \"OriginatorConversationID\": \"$KEY\"}}" >/dev/null
+check "a B2C callback saying the credential is locked (8006) pauses all payouts" "$(q "select result_code from payout_pauses where resumed_at is null;")" "8006"
+sleep 5
+check "...with no automatic retry of that payout" "$(q "select count(*) from withdrawal_requests where retry_of = '$W_ID';")" "0"
+R=$(curl -s -m 60 -w ' %{http_code}' -X POST "$BASE_URL/withdrawals/request" -H "Authorization: Bearer $MAKER")
+check "a withdrawal while paused is refused before reaching M-Pesa (409, says paused)" "$(echo "$R" | grep -o 'paused' | head -1) ${R##* }" "paused 409"
+check "nothing new was sent: still only the one failed payout" "$(q "select count(*) from withdrawal_requests where recipient_id = '$PRODUCER_ID' and requested_at >= '$STARTED_AT';")" "1"
+check "the coordinator sees the pause on Reconciliation" "$(curl -s -m 60 "$BASE_URL/admin/reconciliation" -H "Authorization: Bearer $COORD_TOKEN" | json "['payouts_paused']['result_code']")" "8006"
+check "a maker can't resume payouts (403)" "$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST "$BASE_URL/admin/payouts/resume" -H "Authorization: Bearer $MAKER")" "403"
+check "the coordinator resumes payouts" "$(curl -s -m 60 -X POST "$BASE_URL/admin/payouts/resume" -H "Authorization: Bearer $COORD_TOKEN" | json "['resumed']")" "True"
+check "...and the pause is gone" "$(q "select count(*) from payout_pauses where resumed_at is null;")" "0"
 
 echo
 echo "== Summary: $PASS passed, $FAIL failed =="

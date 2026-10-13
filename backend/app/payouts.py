@@ -36,6 +36,41 @@ class PayoutRefused(Exception):
     """The recipient can't be paid out right now; the message says why."""
 
 
+# B2C callback ResultCodes that mean the initiator can't pay anyone (8006: credential
+# locked; 2001: initiator information invalid). Retrying would only extend the lock.
+PAUSE_RESULT_CODES = {"8006", "2001"}
+
+
+async def active_pause(session: AsyncSession):
+    return (
+        await session.execute(text("select id, result_code, reason, paused_at from payout_pauses where resumed_at is null"))
+    ).one_or_none()
+
+
+async def pause_payouts(session: AsyncSession, result_code: str, reason: str) -> None:
+    """Stops every payout until a coordinator resumes them (migration 0015). Commits."""
+    await session.execute(
+        text(
+            "insert into payout_pauses (result_code, reason) select :code, :reason "
+            "where not exists (select 1 from payout_pauses where resumed_at is null)"
+        ),
+        {"code": str(result_code), "reason": reason or ""},
+    )
+    await session.commit()
+    log.critical("PAYOUTS PAUSED: B2C ResultCode %s (%s). Fix the credential, then resume payouts.", result_code, reason)
+
+
+async def resume_payouts(session: AsyncSession, resumed_by=None) -> bool:
+    ended = (
+        await session.execute(
+            text("update payout_pauses set resumed_at = now(), resumed_by = :by where resumed_at is null returning id"),
+            {"by": resumed_by},
+        )
+    ).one_or_none()
+    await session.commit()
+    return ended is not None
+
+
 class PayoutCapExceeded(RuntimeError):
     """A B2C payout would send more than the M-Pesa money behind it. Never expected:
     raised (and logged as critical) instead of paying, so a ledger bug can't turn into
@@ -113,6 +148,13 @@ async def _initiate(session: AsyncSession, recipient_type: str, recipient_id, am
     # Everything that can fail before Daraja is called happens before the withdrawal
     # row is committed: a row committed as 'requested' that never reaches B2C would
     # count as in flight and block this recipient indefinitely.
+    pause = await active_pause(session)
+    if pause is not None:
+        await session.rollback()
+        raise PayoutRefused(
+            f"Payouts are paused: M-Pesa refused the payout credential (ResultCode {pause.result_code}). "
+            "Your balance is safe; the coordinator will resume payouts."
+        )
     await _check_mpesa_cover(session, recipient_type, recipient_id, amount)
     phone_row = (
         await session.execute(

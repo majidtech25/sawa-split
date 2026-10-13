@@ -6,15 +6,17 @@
 # verify_stage4.sh for the cash rules). Then:
 #   - the 18:00 sweep (run now via scripts/run_sweep.py) pays the producer by real B2C
 #     and the M-Pesa-sourced ledger entry reaches 'paid' (rule 10);
-#   - the driver's payout fails for real (ResultCode 2040: the sandbox only pays its
-#     test MSISDN, and the driver fixture's phone isn't it), gets exactly one
-#     automatic retry, which also fails and waits for a coordinator (rule 11);
+#   - the driver's payout fails without reaching Daraja: the sandbox only pays its test
+#     MSISDN, so app/daraja.py refuses any other number before sending (a real attempt
+#     would fail with 2040, and repeated failures lock the initiator, 8006). It gets
+#     exactly one automatic retry, which also fails and waits for a coordinator (rule 11);
 #   - a redelivered failure callback doesn't start a second retry (rule 7);
 #   - a second sweep the same day skips both; the coordinator's manual retry pays the
 #     same amount again and, failing, gets no automatic retry of its own;
 #   - funds never leave 'available' on failure; an unconfirmed cash sale past its
 #     deadline is expired by the background job and writes no ledger entries.
-# Makes 3 failing B2C calls (driver) and 1 succeeding one (producer).
+# Sends exactly 1 real B2C (the producer's, to the sandbox number). The driver's 3
+# payout attempts are refused before sending. Refuses to start while payouts are paused.
 #
 # Requires: the API running locally with DARAJA_CALLBACK_BASE_URL pointed at a live
 # ngrok tunnel, and the stage-3 fixtures. Cleans up this run's rows at the end.
@@ -105,6 +107,7 @@ COORD_TOKEN=$(echo "$COORD_LOGIN" | json "['access_token']")
 # The sweep pays everyone eligible, so refuse to run if anyone else would be swept.
 OTHERS=$(q "select count(*) from (select recipient_id from wallet_ledger_entries where status = 'available' group by recipient_id having sum(amount) >= 500) s;")
 [ "$OTHERS" = "0" ] || { echo "FATAL: $OTHERS recipient(s) already hold >= KES 500 available; the sweep would pay them too."; exit 1; }
+[ "$(q "select count(*) from payout_pauses where resumed_at is null;")" = "0" ] || { echo "FATAL: payouts are paused (a locked B2C credential); fix it and resume before running this."; exit 1; }
 STARTED_AT=$(q "select now();")
 trap cleanup EXIT
 
@@ -130,7 +133,7 @@ check "producer payout has a real B2C receipt" "$([ -n "$(q "select b2c_receipt 
 check "M-Pesa-sourced maker ledger entry reached 'paid'" "$(q "select status from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'maker';")" "paid"
 
 echo
-echo "== Test 2: driver payout fails (2040), one automatic retry, then waits (rule 11) =="
+echo "== Test 2: driver payout fails (refused before sending), one automatic retry, then waits (rule 11) =="
 wait_for "driver's first payout is marked 'retried'" "select status from withdrawal_requests where id = '$D_W1';" "retried" 120
 D_W2=$(q "select id from withdrawal_requests where retry_of = '$D_W1';")
 check "the automatic retry pays the same amount" "$(q "select amount from withdrawal_requests where id = '$D_W2';")" "600.00"
@@ -172,7 +175,7 @@ D_W3=$(echo "$MANUAL" | json "['id']")
 check "manual retry pays the same amount" "$(echo "$MANUAL" | json "['amount']")" "600.00"
 check "manual retry links to the failed retry" "$(echo "$MANUAL" | json "['retry_of']")" "$D_W2"
 check "the failed retry is now 'retried'" "$(q "select status from withdrawal_requests where id = '$D_W2';")" "retried"
-wait_for "manual retry fails for real (2040) and stays 'failed'" "select status from withdrawal_requests where id = '$D_W3';" "failed" 120
+wait_for "manual retry fails (refused before sending) and stays 'failed'" "select status from withdrawal_requests where id = '$D_W3';" "failed" 120
 sleep 10
 check "a failed manual retry gets no automatic retry" "$(q "select count(*) from withdrawal_requests where retry_of = '$D_W3';")" "0"
 check "driver funds still 'available'" "$(q "select status from wallet_ledger_entries where transaction_id = '$TXN_ID' and recipient_type = 'driver';")" "available"

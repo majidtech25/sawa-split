@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -9,6 +10,7 @@ from .. import lifecycle, payouts, verification
 from ..db import get_session
 
 router = APIRouter(prefix="/daraja", tags=["daraja"], include_in_schema=False)
+log = logging.getLogger("sawa.daraja")
 
 ACK = {"ResultCode": 0, "ResultDesc": "Accepted"}
 
@@ -35,6 +37,8 @@ async def b2c_callback(
     result = payload.get("Result", {})
     originator_conversation_id = result.get("OriginatorConversationID")
     result_code = result.get("ResultCode")
+    # Safaricom's verdict, for the Render logs (no secrets in these fields).
+    log.info("B2C callback for %s: ResultCode %s, %s", originator_conversation_id, result_code, result.get("ResultDesc"))
 
     row = (
         await session.execute(
@@ -54,6 +58,11 @@ async def b2c_callback(
             {"id": row.id},
         )
         await session.commit()
+        if str(result_code) in payouts.PAUSE_RESULT_CODES:
+            # The initiator itself can't pay (locked or invalid): no retry, and every
+            # other payout stops too, until a coordinator resumes them (migration 0015).
+            await payouts.pause_payouts(session, str(result_code), result.get("ResultDesc"))
+            return ACK
         background.add_task(payouts.retry_after_callback_failure, row.id)
         return ACK
 

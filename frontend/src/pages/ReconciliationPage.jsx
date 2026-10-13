@@ -126,6 +126,50 @@ function PaymentChecks({ checks, reload }) {
   )
 }
 
+// Every payout stops when M-Pesa refuses the payout credential (migration 0015), so a
+// locked initiator isn't hammered into a longer lock. Resume once it's fixed.
+function PayoutsPaused({ pause, reload }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  async function resume() {
+    setBusy(true)
+    setError(null)
+    try {
+      await api("/admin/payouts/resume", { method: "POST", auth: true })
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <section role="alert" className="mt-4 rounded-sawa border border-sawa-terracotta/40 bg-sawa-surface p-4 text-sm">
+      <p className="flex items-center gap-2 font-semibold text-sawa-terracotta">
+        <AlertTriangle aria-hidden="true" className="size-4 shrink-0" /> Payouts are paused
+      </p>
+      <p className="mt-1 text-sawa-text-muted">
+        M-Pesa refused the payout credential (ResultCode {pause.result_code}: {pause.reason}) at {eatDateTime(pause.paused_at)}.
+        No payout is sent until you resume, so a locked credential isn't locked for longer. Balances are safe. Fix the
+        credential in the Daraja portal first.
+      </p>
+      <div className="mt-3 flex items-center gap-4">
+        <button
+          type="button"
+          onClick={resume}
+          disabled={busy}
+          className="text-sm text-sawa-green underline-offset-2 hover:underline disabled:text-sawa-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+        >
+          {busy ? "Resuming…" : "Resume payouts"}
+        </button>
+      </div>
+      <div className="mt-2">
+        <ErrorNote>{error}</ErrorNote>
+      </div>
+    </section>
+  )
+}
+
 function useReconciliation() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
@@ -164,6 +208,7 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
       <div className="mt-4">
         <ErrorNote>{error}</ErrorNote>
       </div>
+      {data?.payouts_paused && <PayoutsPaused pause={data.payouts_paused} reload={reload} />}
 
       {t && (
         <>

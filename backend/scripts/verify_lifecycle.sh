@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Verifies account closure, suspension and the audit log (CLAUDE.md rule 17,
 # migration 0011). No STK Push: M-Pesa money comes from simulated callbacks
-# (scripts/simulate_mpesa_sale.py), cash sales go through the real API. Real Daraja
-# sandbox B2C is used for two final payouts only:
-#   - the driver fixture's (fails for real with 2040: the sandbox only pays its test
-#     number), proving a failed final payout leaves the account open ('closing');
+# (scripts/simulate_mpesa_sale.py), cash sales go through the real API. Exactly one
+# real sandbox B2C is sent (the producer's final payout); two final payouts are tested:
+#   - the driver fixture's, which fails without reaching Daraja (app/daraja.py refuses a
+#     sandbox B2C to any number but the test MSISDN), proving a failed final payout
+#     leaves the account open ('closing');
 #   - the producer fixture's, to the sandbox test number, which succeeds and closes it.
 # A temporary driver (created and deleted here) covers closing with nothing to pay.
 #
@@ -154,6 +155,7 @@ BUSY=$(q "select (select count(*) from wallet_ledger_entries where recipient_id 
   + (select count(*) from closure_requests where status in ('pending','approved'))
   + (select count(*) from account_suspensions where lifted_at is null);")
 [ "$BUSY" = "0" ] || { echo "FATAL: the fixtures already hold a balance, debt, open closure request or suspension."; exit 1; }
+[ "$(q "select count(*) from payout_pauses where resumed_at is null;")" = "0" ] || { echo "FATAL: payouts are paused (a locked B2C credential); fix it and resume before running this."; exit 1; }
 STARTED_AT=$(q "select now();")
 trap cleanup EXIT
 
@@ -225,13 +227,13 @@ check "a suspended maker can't take new sales either (422)" "$(
 PRODUCER_TOKEN=$(login "$PRODUCER_PHONE" "$PRODUCER_PIN" | json "['access_token']")
 
 echo
-echo "== Test 4: a failed final payout leaves the account open (driver, real 2040) =="
+echo "== Test 4: a failed final payout leaves the account open (driver, refused before sending) =="
 REQ=$(post /accounts/me/closure "$DRIVER_TOKEN" '{"reason":"[test] leaving"}' | json "['id']"); need "driver's second closure request" "$REQ"
 A=$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN" '{"note":"[test] approved"}')
 check "approved, account closing" "$(echo "$A" | json "['status']") $(echo "$A" | json "['account_status']")" "approved closing"
 check "final payout is the payable 60, below KES 500" "$(echo "$A" | json "['payout']['amount']")" "60.00"
 W1=$(echo "$A" | json "['payout']['id']")
-wait_for "the payout fails for real and gets its one automatic retry" "select status from withdrawal_requests where id = '$W1';" "retried" 120
+wait_for "the payout fails and gets its one automatic retry" "select status from withdrawal_requests where id = '$W1';" "retried" 120
 W2=$(q "select id from withdrawal_requests where retry_of = '$W1';")
 wait_for "the retry fails too and waits for a coordinator" "select status from withdrawal_requests where id = '$W2';" "failed" 120
 check "the account stays closing, the request approved" "$(q "select account_status from drivers where id = '$DRIVER_ID';") $(q "select status from closure_requests where id = '$REQ';")" "closing approved"

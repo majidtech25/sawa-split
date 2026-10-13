@@ -104,6 +104,7 @@ async def handle_stk_callback(
     mode = mode or settings.stk_query_mode
     stk = payload.get("Body", {}).get("stkCallback", {})
     checkout_request_id = stk.get("CheckoutRequestID")
+    log.info("STK callback for %s: ResultCode %s, %s", checkout_request_id, stk.get("ResultCode"), stk.get("ResultDesc"))
     txn = (
         await session.execute(
             text(
@@ -203,6 +204,7 @@ async def check_payment(session: AsyncSession, transaction_id, *, query: Query |
     except Exception as exc:  # network trouble is "no answer yet", never a verdict
         answer = {"errorMessage": f"no answer: {exc}"}
     outcome, description = classify(answer)
+    log.info("STK Push Query for %s: %s (%s)", transaction_id, outcome, description)
     attempts = row.attempts + 1
     next_delay = 0
 

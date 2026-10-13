@@ -103,6 +103,20 @@ async def stk_query(checkout_request_id: str) -> dict[str, Any]:
         return {"errorCode": f"http-{resp.status_code}", "errorMessage": resp.text[:200]}
 
 
+# Safaricom's sandbox only pays its own test MSISDN; B2C to any other number fails with
+# ResultCode 2040, and repeated failures lock the initiator (8006) for everyone. So in
+# the sandbox a payout to any other number is refused here, before any request is sent.
+SANDBOX_B2C_MSISDN = "254708374149"
+
+
+class SandboxRecipientRefused(Exception):
+    """A sandbox B2C to a number the sandbox can't pay. Nothing was sent to Daraja."""
+
+
+def is_sandbox() -> bool:
+    return "sandbox.safaricom.co.ke" in settings.daraja_base_url
+
+
 async def b2c_payment(
     *,
     phone: str,
@@ -113,6 +127,10 @@ async def b2c_payment(
     timeout_url: str,
     originator_conversation_id: str,
 ) -> dict[str, Any]:
+    if is_sandbox() and format_phone(phone) != SANDBOX_B2C_MSISDN:
+        raise SandboxRecipientRefused(
+            f"Not sent: the Daraja sandbox only pays {SANDBOX_B2C_MSISDN}, and failed payouts lock the initiator."
+        )
     token = await get_access_token()
     body = {
         "OriginatorConversationID": originator_conversation_id,

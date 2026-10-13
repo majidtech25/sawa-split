@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import links, verification
+from .. import links, payouts, verification
 from ..db import get_session
 from .public import build_checkout
 from ..security import require_admin
@@ -76,8 +76,15 @@ class PaymentCheck(BaseModel):
     last_result: str | None     # Safaricom's last answer, in words
 
 
+class PayoutPause(BaseModel):
+    result_code: str
+    reason: str
+    paused_at: str
+
+
 class ReconciliationResponse(BaseModel):
     totals: Totals
+    payouts_paused: PayoutPause | None  # set while every payout is stopped (migration 0015)
     payment_checks: list[PaymentCheck]
     debts: list[DebtRow]
     transactions: list[TransactionRow]
@@ -194,8 +201,11 @@ async def reconciliation(
         )
     ).all()
 
+    pause = await payouts.active_pause(session)
     return ReconciliationResponse(
         totals=totals,
+        payouts_paused=PayoutPause(result_code=pause.result_code, reason=pause.reason, paused_at=pause.paused_at.isoformat())
+        if pause else None,
         payment_checks=[
             PaymentCheck(
                 transaction_id=str(c.transaction_id), created_at=c.txn_created_at.isoformat(),
@@ -353,6 +363,20 @@ def _is_uuid(value: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+class ResumeResult(BaseModel):
+    resumed: bool
+
+
+@router.post("/payouts/resume", response_model=ResumeResult)
+async def resume_payouts(
+    admin: Annotated[dict[str, Any], Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ResumeResult:
+    """Ends a payout pause (migration 0015), once the B2C credential has been fixed.
+    Payouts that failed while paused are retried from the Payouts table as usual."""
+    return ResumeResult(resumed=await payouts.resume_payouts(session, admin["id"]))
 
 
 class PriceCardRequest(BaseModel):

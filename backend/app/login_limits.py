@@ -26,15 +26,18 @@ def phone_key(phone: str) -> str:
 
 
 def client_ip(request: Request) -> str:
-    """The caller's IP. On Render, traffic reaches the API through Cloudflare, which sets
-    CF-Connecting-IP itself (overwriting anything the client sent). Elsewhere, fall back
-    to the last X-Forwarded-For hop (the one our own proxy added), then the socket."""
+    """The caller's IP for the per-IP limit.
+
+    On Render, every request comes through Cloudflare, which sets CF-Connecting-IP to the
+    real client address and refuses any request where the client set it (error 1000), so
+    it can't be forged. Measured on Render (keyed /health): X-Forwarded-For there is
+    "client, Cloudflare edge, Render internal": its last hop is shared by every visitor and
+    its first is whatever the client wrote, and uvicorn's own client address follows that
+    forgeable first hop. So neither is used. Without CF-Connecting-IP (local runs, no
+    proxy) it's the direct socket address."""
     cf = request.headers.get("cf-connecting-ip")
     if cf:
         return cf.strip()
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 

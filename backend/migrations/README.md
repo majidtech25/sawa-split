@@ -75,3 +75,8 @@ browser, not in Realtime). It also adds the `verifying` status and
 `login_lockouts` (5 failures per phone or 20 per IP in 15 minutes lock it for 15
 minutes), and lets `account_audit_log` record `login_locked` for coordinators,
 unregistered phones and IPs. Proven by `scripts/verify_security.sh` Test 5.
+
+0014 adds the `login_unlocked` audit action (coordinator Unlock button,
+`scripts/clear_login_lockout.py`). 0015 adds `payout_pauses`: the first B2C callback
+with ResultCode 8006/2001 pauses every payout until resumed (Reconciliation →
+Resume payouts, or `scripts/resume_payouts.py`). Covered by `verify_security.sh` Tests 5-6.
