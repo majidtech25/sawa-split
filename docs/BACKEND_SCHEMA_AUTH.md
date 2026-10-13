@@ -56,6 +56,10 @@ confirmation_deadline timestamptz,          -- cash only: created_at + CASH_CONF
 created_at            timestamptz not null default now(),
 constraint transactions_at_least_one_component check (product_enabled or photo_enabled)
 
+-- withdrawal_secrets   (migration 0016: no browser role can read it, not streamed by Realtime)
+withdrawal_id   uuid primary key references withdrawal_requests(id) on delete cascade,
+idempotency_key uuid unique not null        -- sent to Daraja as OriginatorConversationID
+
 -- transaction_secrets   (migration 0012: no browser role can read it, not streamed by Realtime)
 transaction_id        uuid primary key references transactions(id) on delete cascade,
 checkout_request_id   text unique,          -- mpesa: Daraja's STK Push id, matched by the callback
@@ -106,8 +110,7 @@ id                uuid primary key default gen_random_uuid(),
 recipient_type    text not null,
 recipient_id      uuid not null,
 amount            numeric not null,
-idempotency_key   uuid unique not null,
-b2c_receipt       text,
+b2c_receipt       text,                      -- (idempotency_key moved to withdrawal_secrets, migration 0016)
 status            text not null check (status in ('requested','processing','paid','failed','retried')),
 requested_at      timestamptz not null default now(),
 resolved_at       timestamptz

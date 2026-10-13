@@ -144,7 +144,7 @@ check "driver funds never left 'available'" "$(q "select status from wallet_ledg
 
 echo
 echo "== Test 3: a redelivered failure callback is a no-op (rule 7) =="
-D_W1_KEY=$(q "select idempotency_key from withdrawal_requests where id = '$D_W1';")
+D_W1_KEY=$(q "select idempotency_key from withdrawal_secrets where withdrawal_id = '$D_W1';")
 curl -s -X POST "$BASE_URL/daraja/b2c-callback" -H "Content-Type: application/json" \
   -d "{\"Result\": {\"ResultCode\": 2040, \"ResultDesc\": \"replayed\", \"OriginatorConversationID\": \"$D_W1_KEY\"}}" >/dev/null
 sleep 5

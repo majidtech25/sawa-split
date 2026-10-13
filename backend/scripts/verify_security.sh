@@ -135,11 +135,11 @@ BEFORE=$(q "select md5(string_agg(t::text, '|' order by t::text)) from (
 
 echo
 echo "== Test 1: no browser writes, to any table =="
-TABLES="transactions wallet_ledger_entries withdrawal_requests cash_debts producers drivers closure_requests account_suspensions account_audit_log auth_credentials transaction_secrets stk_verifications sync_queue_items login_failures login_lockouts"
-key_of() { case $1 in transaction_secrets|stk_verifications) echo transaction_id ;; auth_credentials) echo auth_user_id ;; *) echo id ;; esac; }
+TABLES="transactions wallet_ledger_entries withdrawal_requests cash_debts producers drivers closure_requests account_suspensions account_audit_log auth_credentials transaction_secrets stk_verifications sync_queue_items login_failures login_lockouts withdrawal_secrets payout_pauses"
+key_of() { case $1 in transaction_secrets|stk_verifications) echo transaction_id ;; withdrawal_secrets) echo withdrawal_id ;; auth_credentials) echo auth_user_id ;; *) echo id ;; esac; }
 # The column a PATCH tries to set: the key, except the audit log's generated identity id,
 # which Postgres refuses to set before it even checks permissions (428C9).
-set_of() { case $1 in account_audit_log) echo reason ;; login_failures) echo phone ;; login_lockouts) echo key ;; *) key_of "$1" ;; esac; }
+set_of() { case $1 in account_audit_log|payout_pauses) echo reason ;; login_failures) echo phone ;; login_lockouts) echo key ;; *) key_of "$1" ;; esac; }
 for label in maker driver coordinator anonymous; do
   case $label in maker) jwt="$MAKER" ;; driver) jwt="$DRIVER" ;; coordinator) jwt="$COORD_TOKEN" ;; *) jwt="anon" ;; esac
   fails_before=$FAIL
@@ -156,7 +156,7 @@ for label in maker driver coordinator anonymous; do
       fi
     done
   done
-  [ "$FAIL" -eq "$fails_before" ] && { echo "PASS  $label: insert, update and delete refused on all 15 tables"; PASS=$((PASS+1)); }
+  [ "$FAIL" -eq "$fails_before" ] && { echo "PASS  $label: insert, update and delete refused on all 17 tables"; PASS=$((PASS+1)); }
 done
 refused "maker can't change their own account_status" "$(rest PATCH "producers?id=eq.$PRODUCER_ID" "$MAKER" '{"account_status":"active"}')"
 refused "maker can't change their own split percentage" "$(rest PATCH "producers?id=eq.$PRODUCER_ID" "$MAKER" '{"default_split_driver_pct":0}')"
@@ -165,7 +165,7 @@ refused "maker can't change their sale's amounts" "$(rest PATCH "transactions?id
 refused "maker can't change their sale's status" "$(rest PATCH "transactions?id=eq.$OWN" "$MAKER" '{"status":"initiated"}')"
 refused "maker can't change a ledger entry's amount" "$(rest PATCH "wallet_ledger_entries?transaction_id=eq.$OWN" "$MAKER" '{"amount":100000}')"
 refused "maker can't mark entries available or paid" "$(rest PATCH "wallet_ledger_entries?recipient_id=eq.$PRODUCER_ID" "$MAKER" '{"status":"available"}')"
-refused "maker can't insert a withdrawal" "$(rest POST withdrawal_requests "$MAKER" "{\"recipient_type\":\"maker\",\"recipient_id\":\"$PRODUCER_ID\",\"amount\":1,\"idempotency_key\":\"$(python3 -c 'import uuid; print(uuid.uuid4())')\",\"status\":\"requested\"}")"
+refused "maker can't insert a withdrawal" "$(rest POST withdrawal_requests "$MAKER" "{\"recipient_type\":\"maker\",\"recipient_id\":\"$PRODUCER_ID\",\"amount\":1,\"status\":\"requested\"}")"
 refused "maker can't settle or erase a cash debt" "$(rest PATCH "cash_debts?producer_id=eq.$PRODUCER_ID" "$MAKER" '{"status":"settled"}')"
 refused "maker can't approve their own closure" "$(rest PATCH "closure_requests?party_id=eq.$PRODUCER_ID" "$MAKER" '{"status":"approved"}')"
 refused "driver can't change their own account_status" "$(rest PATCH "drivers?id=eq.$DRIVER_ID" "$DRIVER" '{"account_status":"active"}')"
@@ -379,8 +379,17 @@ PY
 check "a sandbox B2C to the driver's number is refused before any request (not even a token fetch)" "$GUARD" "refused, 0 requests"
 P_SALE=$(mpesa_sale "$PRODUCER_ID" 1000 -); need "producer M-Pesa sale for the pause test" "$P_SALE"; TXN_IDS+=("$P_SALE")
 KEY=$(python3 -c "import uuid; print(uuid.uuid4())")
-W_ID=$(q "insert into withdrawal_requests (recipient_type, recipient_id, amount, idempotency_key, status) values ('maker', '$PRODUCER_ID', 1000, '$KEY', 'processing') returning id;" | head -1)
+W_ID=$(q "insert into withdrawal_requests (recipient_type, recipient_id, amount, status) values ('maker', '$PRODUCER_ID', 1000, 'processing') returning id;" | head -1)
 need "a payout in flight to fail" "$W_ID"
+q "insert into withdrawal_secrets (withdrawal_id, idempotency_key) values ('$W_ID', '$KEY');" >/dev/null
+check "the maker can see their own payout row" "$(curl -s -m 60 "$SB_URL/rest/v1/withdrawal_requests?select=*&id=eq.$W_ID" -H "apikey: $SB_KEY" -H "Authorization: Bearer $MAKER" | python3 -c "import json,sys; r=json.load(sys.stdin); print(len(r))")" "1"
+check "...but not its B2C correlation key: no such column, no value anywhere in the row" \
+  "$(curl -s -m 60 "$SB_URL/rest/v1/withdrawal_requests?select=*&id=eq.$W_ID" -H "apikey: $SB_KEY" -H "Authorization: Bearer $MAKER" | python3 -c "import json,sys; r=json.load(sys.stdin)[0]; print('leak' if 'idempotency_key' in r or '$KEY' in json.dumps(r) else 'hidden')")" "hidden"
+refused "a maker can't read withdrawal_secrets, even for their own payout" "$(rest GET "withdrawal_secrets?select=*&withdrawal_id=eq.$W_ID" "$MAKER")"
+refused "the coordinator's browser can't read withdrawal_secrets either" "$(rest GET "withdrawal_secrets?select=*" "$COORD_TOKEN")"
+check "Realtime doesn't stream withdrawal_secrets" "$(q "select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'withdrawal_secrets';")" "0"
+check "withdrawal_requests (which Realtime streams) has no correlation key column" \
+  "$(q "select count(*) from information_schema.columns where table_name = 'withdrawal_requests' and column_name = 'idempotency_key';")" "0"
 curl -s -m 60 -X POST "$BASE_URL/daraja/b2c-callback" -H "Content-Type: application/json" \
   -d "{\"Result\": {\"ResultCode\": 8006, \"ResultDesc\": \"The security credential is locked.\", \"OriginatorConversationID\": \"$KEY\"}}" >/dev/null
 check "a B2C callback saying the credential is locked (8006) pauses all payouts" "$(q "select result_code from payout_pauses where resumed_at is null;")" "8006"

@@ -179,14 +179,19 @@ async def _initiate(session: AsyncSession, recipient_type: str, recipient_id, am
         await session.execute(
             text(
                 """
-                insert into withdrawal_requests (recipient_type, recipient_id, amount, idempotency_key, status, retry_of)
-                values (:rtype, :rid, :amount, :key, 'requested', :retry_of)
+                insert into withdrawal_requests (recipient_type, recipient_id, amount, status, retry_of)
+                values (:rtype, :rid, :amount, 'requested', :retry_of)
                 returning id
                 """
             ),
-            {"rtype": recipient_type, "rid": recipient_id, "amount": amount, "key": idempotency_key, "retry_of": retry_of},
+            {"rtype": recipient_type, "rid": recipient_id, "amount": amount, "retry_of": retry_of},
         )
     ).one()
+    # The key Daraja echoes back lives where no browser can read it (migration 0016).
+    await session.execute(
+        text("insert into withdrawal_secrets (withdrawal_id, idempotency_key) values (:id, :key)"),
+        {"id": row.id, "key": idempotency_key},
+    )
     await session.commit()
 
     try:

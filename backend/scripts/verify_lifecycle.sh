@@ -188,7 +188,7 @@ post "/admin/transactions/$CASH_ID/dispute" "$COORD_TOKEN" >/dev/null
 contains "blocked: an open dispute" "$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")" "open dispute"
 check "the dispute freezes the driver's 60 (rule 13)" "$(me "$DRIVER_TOKEN" | json "['payable']")" "0"
 post "/admin/transactions/$CASH_ID/resolve" "$COORD_TOKEN" >/dev/null
-q "insert into withdrawal_requests (recipient_type, recipient_id, amount, idempotency_key, status) values ('driver', '$DRIVER_ID', 60, gen_random_uuid(), 'processing');" >/dev/null
+q "insert into withdrawal_requests (recipient_type, recipient_id, amount, status) values ('driver', '$DRIVER_ID', 60, 'processing');" >/dev/null
 contains "blocked: a payout in progress" "$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")" "payout is in progress"
 q "delete from withdrawal_requests where recipient_id = '$DRIVER_ID' and status = 'processing' and b2c_receipt is null and requested_at >= '$STARTED_AT';" >/dev/null
 check "reject without a reason is refused (422)" "$(post_code "/admin/closure-requests/$REQ/reject" "$COORD_TOKEN" '{"reason":""}')" "422"

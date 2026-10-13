@@ -117,6 +117,10 @@ constraint transactions_at_least_one_component check (product_enabled or photo_e
 -- checkout_request_id and tourist_confirm_token are NOT on this table: makers and drivers
 -- read it and Realtime streams it. They live in transaction_secrets (migration 0012).
 
+-- withdrawal_secrets   (migration 0016: no browser role can read it, not in the Realtime publication)
+withdrawal_id   uuid primary key references withdrawal_requests(id) on delete cascade,
+idempotency_key uuid unique not null        -- sent to Daraja as OriginatorConversationID; the B2C callback matches on it
+
 -- transaction_secrets   (no browser role can read it, not in the Realtime publication)
 transaction_id        uuid primary key references transactions(id) on delete cascade,
 checkout_request_id   text unique,          -- mpesa: Daraja's STK Push id, matched by the callback
@@ -161,12 +165,11 @@ status          text not null default 'outstanding' check (status in ('outstandi
 created_at      timestamptz not null default now(),
 settled_at      timestamptz                               -- set exactly when status = 'settled'
 
--- withdrawal_requests
+-- withdrawal_requests   (the B2C idempotency key is NOT here since migration 0016: see withdrawal_secrets)
 id                uuid primary key default gen_random_uuid(),
 recipient_type    text not null,
 recipient_id      uuid not null,
 amount            numeric not null,
-idempotency_key   uuid unique not null,
 b2c_receipt       text,
 status            text not null check (status in ('requested','processing','paid','failed','retried')),
 requested_at      timestamptz not null default now(),
@@ -287,7 +290,11 @@ Enforced twice: Supabase Row Level Security at the data layer, FastAPI endpoint 
 - **Counters and audit:** a successful login clears that phone's failures. Every lockout is written to `account_audit_log` (`login_locked`).
 - **bcrypt:** cost 10, and the checks run in a worker thread, not on the event loop. A PIN stored at another cost is re-hashed after its next successful login.
 
-Two columns are secret even from their owners: `checkout_request_id` (it would let someone aim a forged STK callback) and `tourist_confirm_token`. They live in `transaction_secrets`, which no browser role can read and Realtime doesn't stream. `auth_credentials` is likewise unreadable.
+Three values are secret even from their owners, because each would let someone aim a forged Daraja callback or confirmation:
+- `checkout_request_id` and `tourist_confirm_token` live in `transaction_secrets`;
+- the B2C correlation key (`idempotency_key`, sent as `OriginatorConversationID`) lives in `withdrawal_secrets` (migration 0016). With it, a fake "failed" callback during a real payout could trigger the automatic retry and pay twice.
+
+No browser role can read either table, and Realtime doesn't stream them. `auth_credentials` is likewise unreadable.
 
 Permission matrix. **Browser** is a direct read through Supabase with the Publishable key; **API** is a FastAPI endpoint:
 
@@ -371,6 +378,8 @@ Per the Implementation Plan: formalize the pilot agreement, co-design/print the 
 ## 10. Explicitly not building yet
 
 Production Daraja B2C approval (parallel-tracked, not a blocker for sandbox demo), dynamic GPS-scored referee commissions, dark mode (tokens exist, implementation deferred), any platform fee/community-fund mechanism, partial withdrawals, automatic dispute resolution, multi-currency/KYC/tax handling, public self-registration, geofencing on cash confirmation (same-site check — a Phase 2 hardening step, not a Phase 1 blocker), true offline/no-connectivity capture (`sync_queue_items` exists in the schema but is unbuilt — not the same thing as cash tracking, see section 3).
+
+**Known post-pitch item: sign the B2C result URL per payout.** STK callbacks arrive at a per-transaction signed URL (`/daraja/stk-callback/{token}`); B2C result callbacks still arrive at the unsigned `/daraja/b2c-callback`. Hiding the correlation key (migration 0016) closes the practical double-pay path, since a forger can't name a payout. Signing `/daraja/b2c-callback/{token}` per withdrawal, as for STK, is the defence-in-depth step, deliberately left until after the pitch.
 
 **Known pilot limitation: price cards are signed per maker + driver pair.** Each card's signature (`app/links.py`) covers the producer, the prices *and* the driver's QR code, so every driver who brings tourists to a stall needs their own printed card for that stall. That's fine for the pilot's one or two pairs but won't scale. Phase 2 should sign only producer + prices and attach the driver separately at checkout (for example, by scanning the driver's own QR card, which already opens `#/driver/<code>`).
 

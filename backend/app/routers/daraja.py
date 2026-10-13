@@ -1,4 +1,5 @@
 import logging
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -33,16 +34,23 @@ async def b2c_callback(
 ) -> dict:
     """Real Daraja B2C result callback (CLAUDE.md section 6 step 5). Correlates back to
     withdrawal_requests via OriginatorConversationID, which we set to our own
-    idempotency_key at request time — no extra column needed for that linkage."""
+    idempotency_key at request time (kept in withdrawal_secrets, migration 0016)."""
     result = payload.get("Result", {})
     originator_conversation_id = result.get("OriginatorConversationID")
     result_code = result.get("ResultCode")
     # Safaricom's verdict, for the Render logs (no secrets in these fields).
     log.info("B2C callback for %s: ResultCode %s, %s", originator_conversation_id, result_code, result.get("ResultDesc"))
 
+    try:
+        uuid.UUID(str(originator_conversation_id))
+    except ValueError:
+        return ACK  # not one of ours
     row = (
         await session.execute(
-            text("select * from withdrawal_requests where idempotency_key = :key"),
+            text(
+                "select w.* from withdrawal_requests w join withdrawal_secrets s on s.withdrawal_id = w.id "
+                "where s.idempotency_key = cast(:key as uuid)"
+            ),
             {"key": originator_conversation_id},
         )
     ).one_or_none()

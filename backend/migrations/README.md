@@ -80,3 +80,10 @@ unregistered phones and IPs. Proven by `scripts/verify_security.sh` Test 5.
 `scripts/clear_login_lockout.py`). 0015 adds `payout_pauses`: the first B2C callback
 with ResultCode 8006/2001 pauses every payout until resumed (Reconciliation →
 Resume payouts, or `scripts/resume_payouts.py`). Covered by `verify_security.sh` Tests 5-6.
+
+0016 moves the B2C correlation key (`withdrawal_requests.idempotency_key`, sent as
+`OriginatorConversationID`) to `withdrawal_secrets`, unreadable from the browser and
+not streamed by Realtime, so nobody can aim a fake B2C failure callback at a payout in
+flight (which would trigger a second payout). Checked by `verify_security.sh` Test 6.
+`verify_0001.sh` and `verify_0002_rls.sh` are historical (stage 2): they predate 0012
+and 0016 and no longer match the schema; `verify_security.sh` supersedes them.
