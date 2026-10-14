@@ -87,3 +87,8 @@ not streamed by Realtime, so nobody can aim a fake B2C failure callback at a pay
 flight (which would trigger a second payout). Checked by `verify_security.sh` Test 6.
 `verify_0001.sh` and `verify_0002_rls.sh` are historical (stage 2): they predate 0012
 and 0016 and no longer match the schema; `verify_security.sh` supersedes them.
+
+0017 is v2 (SCOPE_V2.md): `drivers.referral_code` and `producers.stall_code` (unique,
+case-insensitive, backfilled from first names), `producers.photo_fee`, the `open_sales`
+table (no browser access) and `transactions.open_sale_id`. Additive only. Proven by
+`scripts/verify_v2.sh`.

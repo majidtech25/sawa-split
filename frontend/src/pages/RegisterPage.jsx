@@ -35,7 +35,7 @@ function Checkbox({ id, checked, onChange, children }) {
   )
 }
 
-const EMPTY = { name: "", phone: "", till: "", pin: "", site: "", split: "30", product: true, photo: false }
+const EMPTY = { name: "", phone: "", till: "", pin: "", site: "", split: "30", product: true, photo: false, photoFee: "" }
 
 export default function RegisterPage() {
   const [role, setRole] = useState("producer")
@@ -58,6 +58,8 @@ export default function RegisterPage() {
       if (form.split === "" || Number.isNaN(split) || split < 0 || split > 40)
         e.split = "Between 0 and 40. The maker always keeps at least 60% of the product price."
       if (!form.product && !form.photo) e.charges = "Pick at least one: product, photo consent, or both."
+      if (form.photoFee !== "" && !/^[1-9]\d*$/.test(form.photoFee)) e.photoFee = "Whole shillings only, like 10."
+      if (form.photoFee !== "" && !form.photo) e.photoFee = "Tick photo consent above to charge a photo fee."
     }
     setErrors(e)
     return Object.keys(e).length === 0
@@ -77,6 +79,7 @@ export default function RegisterPage() {
             default_split_driver_pct: Number(form.split),
             charges_product: form.product,
             charges_photo: form.photo,
+            photo_fee: form.photoFee === "" ? null : Number(form.photoFee),
           }
         : { ...base, qr_code: qrCode }
     try {
@@ -92,7 +95,10 @@ export default function RegisterPage() {
         const { error } = await supabase.storage.from("qr-codes").upload(file, blob, { contentType: "image/png", upsert: true })
         qrStored = error ? null : supabase.storage.from("qr-codes").getPublicUrl(file).data.publicUrl
       }
-      setDone({ role, id: created.id, name: base.name, qrCode: role === "driver" ? qrCode : null, qrImage, qrStored })
+      setDone({
+        role, id: created.id, name: base.name, qrCode: role === "driver" ? qrCode : null, qrImage, qrStored,
+        code: created.stall_code || created.referral_code,
+      })
       setForm(EMPTY)
       setQrCode(newQrCode())
     } catch (err) {
@@ -133,8 +139,15 @@ export default function RegisterPage() {
           <p className="flex items-center gap-2 text-sm font-semibold text-sawa-green">
             <Check aria-hidden="true" className="size-4" /> {done.name} is registered
           </p>
+          {done.code && (
+            <p className="mt-2 text-sm">
+              {done.role === "producer" ? "Stall code" : "Referral code"}: <span className="font-mono font-semibold">{done.code}</span>
+            </p>
+          )}
           {done.role === "producer" && (
-            <p className="mt-2 text-[13px] text-sawa-text-muted">Next, make their signed price card under Price cards.</p>
+            <p className="mt-2 text-[13px] text-sawa-text-muted">
+              They print their stand QR from their own dashboard. A signed price card is still available under Price cards.
+            </p>
           )}
           {done.qrImage && (
             <div className="mt-3 flex flex-col items-center gap-2">
@@ -191,6 +204,15 @@ export default function RegisterPage() {
                 {errors.charges || "Each is priced separately. Switch on one or both."}
               </p>
             </fieldset>
+            <Field
+              id="reg-photo-fee"
+              label="Photo fee (KSh, whole, optional)"
+              inputMode="numeric"
+              value={form.photoFee}
+              onChange={(e) => set("photoFee")(e.target.value.trim())}
+              error={errors.photoFee}
+              hint="Offered on the maker's own sales as a separate photo-consent line, paid to them in full."
+            />
           </>
         ) : (
           <div className="flex flex-col gap-1.5">

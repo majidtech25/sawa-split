@@ -135,7 +135,7 @@ BEFORE=$(q "select md5(string_agg(t::text, '|' order by t::text)) from (
 
 echo
 echo "== Test 1: no browser writes, to any table =="
-TABLES="transactions wallet_ledger_entries withdrawal_requests cash_debts producers drivers closure_requests account_suspensions account_audit_log auth_credentials transaction_secrets stk_verifications sync_queue_items login_failures login_lockouts withdrawal_secrets payout_pauses"
+TABLES="transactions wallet_ledger_entries withdrawal_requests cash_debts producers drivers closure_requests account_suspensions account_audit_log auth_credentials transaction_secrets stk_verifications sync_queue_items login_failures login_lockouts withdrawal_secrets payout_pauses open_sales"
 key_of() { case $1 in transaction_secrets|stk_verifications) echo transaction_id ;; withdrawal_secrets) echo withdrawal_id ;; auth_credentials) echo auth_user_id ;; *) echo id ;; esac; }
 # The column a PATCH tries to set: the key, except the audit log's generated identity id,
 # which Postgres refuses to set before it even checks permissions (428C9).
@@ -156,7 +156,7 @@ for label in maker driver coordinator anonymous; do
       fi
     done
   done
-  [ "$FAIL" -eq "$fails_before" ] && { echo "PASS  $label: insert, update and delete refused on all 17 tables"; PASS=$((PASS+1)); }
+  [ "$FAIL" -eq "$fails_before" ] && { echo "PASS  $label: insert, update and delete refused on all 18 tables"; PASS=$((PASS+1)); }
 done
 refused "maker can't change their own account_status" "$(rest PATCH "producers?id=eq.$PRODUCER_ID" "$MAKER" '{"account_status":"active"}')"
 refused "maker can't change their own split percentage" "$(rest PATCH "producers?id=eq.$PRODUCER_ID" "$MAKER" '{"default_split_driver_pct":0}')"

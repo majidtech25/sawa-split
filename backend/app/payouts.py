@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import daraja
+from . import daraja, sales
 from .ledger import available_balance, blocking_withdrawal, lock_money, outstanding_debt, payable_balance, settle_debts
 from .config import settings
 from .db import async_session
@@ -339,11 +339,15 @@ async def expire_unconfirmed_cash() -> int:
     POST /transactions/:id/confirm already expires on read; this keeps the ledger and
     reconciliation view accurate for transactions nobody touches again."""
     async with async_session() as session:
-        result = await session.execute(
-            text(
-                "update transactions set status = 'cash_expired' "
-                "where status = 'cash_unconfirmed' and confirmation_deadline <= now()"
+        expired = (
+            await session.execute(
+                text(
+                    "update transactions set status = 'cash_expired' "
+                    "where status = 'cash_unconfirmed' and confirmation_deadline <= now() returning id"
+                )
             )
-        )
+        ).scalars().all()
+        for transaction_id in expired:
+            await sales.payment_finished(session, transaction_id, paid=False)  # release its open sale
         await session.commit()
-        return result.rowcount
+        return len(expired)

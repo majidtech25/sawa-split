@@ -56,6 +56,9 @@ class AccountSummary(BaseModel):
     owed_by_makers: Decimal     # driver: their shares of cash sales that makers still owe
     cash_held: Decimal          # maker: their shares of confirmed cash sales, already in hand
     account_status: str         # active or closing (suspended and closed accounts are refused with a 403)
+    referral_code: str | None   # driver: their code, for their personal QR (SCOPE_V2)
+    stall_code: str | None      # maker: their stand QR's code
+    photo_fee: Decimal | None   # maker: their photo-consent fee, if any
     closure: ClosureRequest | None  # their latest closure request, if any
 
 
@@ -90,8 +93,17 @@ async def my_account(
         owed_by_makers=owed_by_makers,
         cash_held=cash_held,
         account_status=(await lifecycle.party(session, rtype, party_id)).account_status,
+        **(await _codes(session, rtype, party_id)),
         closure=_closure(await _latest_closure(session, rtype, party_id)),
     )
+
+
+async def _codes(session: AsyncSession, rtype: str, party_id) -> dict:
+    if rtype == "driver":
+        code = (await session.execute(text("select referral_code from drivers where id = :id"), {"id": party_id})).scalar_one()
+        return {"referral_code": code, "stall_code": None, "photo_fee": None}
+    row = (await session.execute(text("select stall_code, photo_fee from producers where id = :id"), {"id": party_id})).one()
+    return {"referral_code": None, "stall_code": row.stall_code, "photo_fee": row.photo_fee}
 
 
 class ClosureRequestBody(BaseModel):

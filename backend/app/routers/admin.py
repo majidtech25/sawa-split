@@ -82,8 +82,16 @@ class PayoutPause(BaseModel):
     paused_at: str
 
 
+class ReferrerRow(BaseModel):
+    name: str
+    referral_code: str
+    sales: int                  # referred sales that went through (M-Pesa confirmed, cash confirmed, disputed)
+    commission: Decimal         # their shares of those sales
+
+
 class ReconciliationResponse(BaseModel):
     totals: Totals
+    referrers: list[ReferrerRow]  # SCOPE_V2 MUST 9
     payouts_paused: PayoutPause | None  # set while every payout is stopped (migration 0015)
     payment_checks: list[PaymentCheck]
     debts: list[DebtRow]
@@ -201,9 +209,23 @@ async def reconciliation(
         )
     ).all()
 
+    referrers = (
+        await session.execute(
+            text(
+                """
+                select d.name, d.referral_code, count(t.id) as sales, coalesce(sum(t.driver_amount), 0) as commission
+                from drivers d
+                left join transactions t on t.driver_id = d.id and t.status in ('confirmed', 'cash_confirmed', 'disputed')
+                group by d.id, d.name, d.referral_code
+                order by commission desc, d.name
+                """
+            )
+        )
+    ).all()
     pause = await payouts.active_pause(session)
     return ReconciliationResponse(
         totals=totals,
+        referrers=[ReferrerRow(name=r.name, referral_code=r.referral_code, sales=r.sales, commission=r.commission) for r in referrers],
         payouts_paused=PayoutPause(result_code=pause.result_code, reason=pause.reason, paused_at=pause.paused_at.isoformat())
         if pause else None,
         payment_checks=[

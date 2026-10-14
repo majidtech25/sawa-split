@@ -23,7 +23,7 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import daraja, links
+from . import daraja, links, sales
 from .config import settings
 from .db import async_session
 from .ledger import settle_debts, write_ledger_entries
@@ -67,6 +67,7 @@ async def _credit(session: AsyncSession, transaction_id, from_status: str) -> bo
     if updated is None:
         await session.commit()
         return False
+    await sales.payment_finished(session, updated.id, paid=True)
     await write_ledger_entries(
         session,
         transaction_id=updated.id,
@@ -126,6 +127,7 @@ async def handle_stk_callback(
         await session.execute(
             text("update transactions set status = 'failed' where id = :id and status = 'initiated'"), {"id": txn.id}
         )
+        await sales.payment_finished(session, txn.id, paid=False)  # the open sale can be paid again
         await session.commit()
         return 200, ACK
 
@@ -235,6 +237,7 @@ async def check_payment(session: AsyncSession, transaction_id, *, query: Query |
         await session.execute(
             text("update transactions set status = 'failed' where id = :id and status = 'verifying'"), {"id": transaction_id}
         )
+        await sales.payment_finished(session, transaction_id, paid=False)
     await session.commit()
     if row.txn_status == "verifying" and state == "verified":
         await _credit(session, transaction_id, "verifying")

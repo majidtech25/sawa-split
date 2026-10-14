@@ -10,7 +10,7 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import daraja, lifecycle, links, supabase_auth
+from .. import daraja, lifecycle, links, sales, supabase_auth
 from ..caller import normalize_phone
 from ..config import settings
 from ..db import get_session
@@ -97,6 +97,123 @@ class InitiateTransactionResponse(BaseModel):
     tourist_confirm_token: str | None = None
 
 
+async def start_payment(
+    session: AsyncSession,
+    *,
+    producer_id,
+    driver_id,
+    payment_method: str,
+    phone: str | None,
+    product_amount: Decimal | None,
+    photo_amount: Decimal | None,
+    split: dict,
+    open_sale_id=None,
+) -> InitiateTransactionResponse:
+    """Creates the transaction and starts the payment: the M-Pesa STK Push, or a cash sale
+    waiting for its two confirmations (rule 12). Shared by the signed price card
+    (initiate, below) and an open sale (app/routers/sales.py), which have already
+    checked the stall, the referrer and the amounts."""
+    confirmation_deadline = None
+    tourist_confirm_token = None
+    if payment_method == "mpesa":
+        _check_stk_rate_limit(phone)
+        txn_status = "initiated"
+    else:
+        txn_status = "cash_unconfirmed"
+        confirmation_deadline = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.cash_confirm_window_minutes
+        )
+        if driver_id is None:
+            # Case B (walk-up, no driver) — tourist confirms via this opaque token
+            # instead of a login she doesn't have (see migration 0005).
+            tourist_confirm_token = secrets.token_urlsafe(32)
+
+    row = (
+        await session.execute(
+            text(
+                """
+                insert into transactions
+                    (producer_id, driver_id, payment_method, product_enabled, product_amount,
+                     product_maker_amount, product_driver_amount, photo_enabled, photo_amount,
+                     total_amount, maker_amount, driver_amount, status, confirmation_deadline, open_sale_id)
+                values
+                    (:producer_id, :driver_id, :payment_method, :product_enabled, :product_amount,
+                     :product_maker_amount, :product_driver_amount, :photo_enabled, :photo_amount,
+                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline, :open_sale_id)
+                returning id
+                """
+            ),
+            {
+                "producer_id": producer_id,
+                "driver_id": driver_id,
+                "payment_method": payment_method,
+                "product_enabled": product_amount is not None,
+                "product_amount": product_amount,
+                "product_maker_amount": split["product_maker_amount"],
+                "product_driver_amount": split["product_driver_amount"],
+                "photo_enabled": photo_amount is not None,
+                "photo_amount": photo_amount,
+                "total_amount": split["total_amount"],
+                "maker_amount": split["maker_amount"],
+                "driver_amount": split["driver_amount"],
+                "status": txn_status,
+                "confirmation_deadline": confirmation_deadline,
+                "open_sale_id": open_sale_id,
+            },
+        )
+    ).one()
+    # Secrets live where no browser can read them, not even the maker's (migration 0012).
+    await session.execute(
+        text("insert into transaction_secrets (transaction_id, tourist_confirm_token) values (:id, :token)"),
+        {"id": row.id, "token": tourist_confirm_token},
+    )
+    await session.commit()
+
+    if payment_method == "mpesa":
+        # CLAUDE.md rule 6: a failed/undeliverable STK push gets no ledger entry and no
+        # auto-retry — mark it failed immediately rather than leaving a dead "initiated"
+        # row waiting on a callback that will never arrive.
+        try:
+            stk_response = await daraja.stk_push(
+                phone=phone,
+                amount=split["total_amount"],
+                account_reference=str(row.id)[:12],
+                transaction_desc="Sawa Split payment",
+                # Signed per transaction, so only Daraja can call it back (app/links.py).
+                callback_url=f"{settings.daraja_callback_base_url}/daraja/stk-callback/{links.callback_token(row.id)}",
+            )
+            if str(stk_response.get("ResponseCode")) != "0":
+                raise RuntimeError(stk_response.get("ResponseDescription", "STK push rejected"))
+        except Exception as exc:
+            await session.execute(
+                text("update transactions set status = 'failed' where id = :id"), {"id": row.id}
+            )
+            await sales.payment_finished(session, row.id, paid=False)  # an open sale can be paid again
+            await session.commit()
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Could not initiate M-Pesa payment: {exc}") from exc
+
+        await session.execute(
+            text("update transaction_secrets set checkout_request_id = :crid where transaction_id = :id"),
+            {"crid": stk_response["CheckoutRequestID"], "id": row.id},
+        )
+        await session.commit()
+
+    return InitiateTransactionResponse(
+        id=str(row.id),
+        status=txn_status,
+        payment_method=payment_method,
+        product_amount=product_amount,
+        product_maker_amount=split["product_maker_amount"],
+        product_driver_amount=split["product_driver_amount"],
+        photo_amount=photo_amount,
+        total_amount=split["total_amount"],
+        maker_amount=split["maker_amount"],
+        driver_amount=split["driver_amount"],
+        confirmation_deadline=confirmation_deadline.isoformat() if confirmation_deadline else None,
+        tourist_confirm_token=tourist_confirm_token,
+    )
+
+
 @router.post("/initiate", response_model=InitiateTransactionResponse, status_code=status.HTTP_201_CREATED)
 async def initiate_transaction(
     body: InitiateTransactionRequest, session: Annotated[AsyncSession, Depends(get_session)]
@@ -153,102 +270,15 @@ async def initiate_transaction(
             status.HTTP_422_UNPROCESSABLE_ENTITY, f"Total must be at least KES {MIN_TRANSACTION_AMOUNT}."
         )
 
-    confirmation_deadline = None
-    tourist_confirm_token = None
-    if body.payment_method == "mpesa":
-        _check_stk_rate_limit(body.phone)
-        txn_status = "initiated"
-    else:
-        txn_status = "cash_unconfirmed"
-        confirmation_deadline = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.cash_confirm_window_minutes
-        )
-        if body.driver_id is None:
-            # Case B (walk-up, no driver) — tourist confirms via this opaque token
-            # instead of a login she doesn't have (see migration 0005).
-            tourist_confirm_token = secrets.token_urlsafe(32)
-
-    row = (
-        await session.execute(
-            text(
-                """
-                insert into transactions
-                    (producer_id, driver_id, payment_method, product_enabled, product_amount,
-                     product_maker_amount, product_driver_amount, photo_enabled, photo_amount,
-                     total_amount, maker_amount, driver_amount, status, confirmation_deadline)
-                values
-                    (:producer_id, :driver_id, :payment_method, :product_enabled, :product_amount,
-                     :product_maker_amount, :product_driver_amount, :photo_enabled, :photo_amount,
-                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline)
-                returning id
-                """
-            ),
-            {
-                "producer_id": body.producer_id,
-                "driver_id": body.driver_id,
-                "payment_method": body.payment_method,
-                "product_enabled": body.product_enabled,
-                "product_amount": body.product_amount,
-                "product_maker_amount": split["product_maker_amount"],
-                "product_driver_amount": split["product_driver_amount"],
-                "photo_enabled": body.photo_enabled,
-                "photo_amount": body.photo_amount,
-                "total_amount": split["total_amount"],
-                "maker_amount": split["maker_amount"],
-                "driver_amount": split["driver_amount"],
-                "status": txn_status,
-                "confirmation_deadline": confirmation_deadline,
-            },
-        )
-    ).one()
-    # Secrets live where no browser can read them, not even the maker's (migration 0012).
-    await session.execute(
-        text("insert into transaction_secrets (transaction_id, tourist_confirm_token) values (:id, :token)"),
-        {"id": row.id, "token": tourist_confirm_token},
-    )
-    await session.commit()
-
-    if body.payment_method == "mpesa":
-        # CLAUDE.md rule 6: a failed/undeliverable STK push gets no ledger entry and no
-        # auto-retry — mark it failed immediately rather than leaving a dead "initiated"
-        # row waiting on a callback that will never arrive.
-        try:
-            stk_response = await daraja.stk_push(
-                phone=body.phone,
-                amount=split["total_amount"],
-                account_reference=str(row.id)[:12],
-                transaction_desc="Sawa Split payment",
-                # Signed per transaction, so only Daraja can call it back (app/links.py).
-                callback_url=f"{settings.daraja_callback_base_url}/daraja/stk-callback/{links.callback_token(row.id)}",
-            )
-            if str(stk_response.get("ResponseCode")) != "0":
-                raise RuntimeError(stk_response.get("ResponseDescription", "STK push rejected"))
-        except Exception as exc:
-            await session.execute(
-                text("update transactions set status = 'failed' where id = :id"), {"id": row.id}
-            )
-            await session.commit()
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Could not initiate M-Pesa payment: {exc}") from exc
-
-        await session.execute(
-            text("update transaction_secrets set checkout_request_id = :crid where transaction_id = :id"),
-            {"crid": stk_response["CheckoutRequestID"], "id": row.id},
-        )
-        await session.commit()
-
-    return InitiateTransactionResponse(
-        id=str(row.id),
-        status=txn_status,
+    return await start_payment(
+        session,
+        producer_id=body.producer_id,
+        driver_id=body.driver_id,
         payment_method=body.payment_method,
+        phone=body.phone,
         product_amount=body.product_amount,
-        product_maker_amount=split["product_maker_amount"],
-        product_driver_amount=split["product_driver_amount"],
         photo_amount=body.photo_amount,
-        total_amount=split["total_amount"],
-        maker_amount=split["maker_amount"],
-        driver_amount=split["driver_amount"],
-        confirmation_deadline=confirmation_deadline.isoformat() if confirmation_deadline else None,
-        tourist_confirm_token=tourist_confirm_token,
+        split=split,
     )
 
 
@@ -287,6 +317,7 @@ async def confirm_cash(
             text("update transactions set status = 'cash_expired' where id = :id and status = 'cash_unconfirmed'"),
             {"id": transaction_id},
         )
+        await sales.payment_finished(session, transaction_id, paid=False)
         await session.commit()
         raise HTTPException(status.HTTP_409_CONFLICT, "Confirmation window has expired.")
     if row.status == "cash_expired":
@@ -379,5 +410,6 @@ async def confirm_cash(
     # The cash never reaches the M-Pesa account: the maker's share is recorded as
     # held in cash and the driver's becomes a debt the maker owes (rule 12).
     await record_cash_sale(session, updated)
+    await sales.payment_finished(session, updated.id, paid=True)
     await session.commit()
     return TransactionStateResponse(id=str(updated.id), status=updated.status)

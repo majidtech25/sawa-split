@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import links
+from .. import links, sales
 from ..db import get_session
 from ..ledger import compute_split
 from .transactions import MIN_TRANSACTION_AMOUNT, require_whole_shillings
@@ -128,6 +128,7 @@ async def build_checkout(session: AsyncSession, producer_id: str, product, photo
 
 class DriverVerification(BaseModel):
     first_name: str
+    referral_code: str          # for the tourist's tour pass, whichever code was scanned
 
 
 @router.get("/drivers/{qr_code}", response_model=DriverVerification)
@@ -135,14 +136,13 @@ async def verify_driver(
     qr_code: str, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> DriverVerification:
     """What a camera scan of a driver's QR card opens: proof the driver is registered.
-    First name only. An unknown code and an inactive driver get the same 404, so the
-    page never reveals that a code once existed."""
-    driver = (
-        await session.execute(text("select name from drivers where qr_code = :qr and active"), {"qr": qr_code})
-    ).one_or_none()
+    Takes the referral code (case-insensitive, e.g. JAMES) or the old QR code
+    (QR-DRIVER-001). First name only. An unknown code and an inactive driver get the
+    same 404, so the page never reveals that a code once existed."""
+    driver = await sales.referrer_by_code(session, qr_code)
     if driver is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "This isn't a registered Sawa Split driver.")
-    return DriverVerification(first_name=driver.name.split()[0])
+    return DriverVerification(first_name=sales.first_name(driver.name), referral_code=driver.referral_code)
 
 
 class ReceiptResponse(BaseModel):

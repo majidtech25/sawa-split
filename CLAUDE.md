@@ -210,6 +210,12 @@ actor_id    uuid, actor_phone text,        -- who
 reason      text,                          -- why
 details     jsonb not null default '{}'
 
+-- v2 (migration 0017, section 7.2): producers.stall_code text not null (unique lower()), producers.photo_fee numeric
+-- (whole KSh, nullable), drivers.referral_code text not null (unique lower()), transactions.open_sale_id uuid
+-- open_sales: id, producer_id, amount (whole KSh > 0), description, photo_fee (snapshot), status
+--   ('open','paying','paid','expired','cancelled'), expires_at (+30 min), created_at, paid_at, cancelled_at;
+--   at most one open/paying per maker; no browser access
+
 -- login_failures   (migration 0013, section 5: failed logins, pruned after a day)
 id    bigint generated always as identity primary key,
 phone text not null,                       -- normalised 254XXXXXXXXX, registered or not
@@ -288,6 +294,7 @@ Enforced twice: Supabase Row Level Security at the data layer, FastAPI endpoint 
 - **While locked:** the PIN isn't even checked. The answer is a plain 429, "Too many attempts, try again in 15 minutes."
 - **Same answer either way:** a wrong PIN and an unregistered phone get the same "Invalid phone or PIN", and an unregistered phone still costs a full bcrypt check, so neither the message nor the timing reveals which phones exist.
 - **Counters and audit:** a successful login clears that phone's failures. Every lockout is written to `account_audit_log` (`login_locked`).
+- **Supabase sign-in failure is not a PIN failure** *(SCOPE_V2 MUST 11)*. When the PIN is right but Supabase Auth's sign-in fails, `POST /auth/login` retries once on 429 or 5xx. If that still fails, it answers 503 "Couldn't sign you in right now, try again in a moment." (it used to say the PIN didn't match). Every login outcome is logged (`sawa.auth`: phone, IP and result, never a PIN or token). The PIN field has autocomplete off, so a shared phone doesn't autofill another account's PIN.
 - **bcrypt:** cost 10, and the checks run in a worker thread, not on the event loop. A PIN stored at another cost is re-hashed after its next successful login.
 
 Three values are secret even from their owners, because each would let someone aim a forged Daraja callback or confirmation:
@@ -355,6 +362,17 @@ A ninth screen, added late in planning: a public marketing homepage (`/` on the 
 4. **Who it's for.** The one licensed photo lives here, as a duotoned background behind or beside four short persona blurbs (tourist, producer, driver, coordinator — same four from the PRD's personas table).
 5. **Roadmap.** A plain text/timeline strip: Pilot → Local Scale → Multi-Site (from the Implementation Plan's Phase 1–3), no photo, no chart.
 6. **Footer.** Link to the live demo, the GitHub repo, the challenge name, and photo attribution if the license requires it.
+
+## 7.2 v2: open sales, stall QR and referral codes *(SCOPE_V2.md, binding; migration 0017)*
+
+Anything not in `SCOPE_V2.md` needs asking first. The split engine stays maker + one referrer, and v1 (signed price cards, tag `v1-demo`) keeps working unchanged.
+- **Codes.** Each referrer has `drivers.referral_code` (e.g. JAMES) and each maker `producers.stall_code` (e.g. WANJIRU). Both are unique and case-insensitive, generated from the first name at registration (a number is appended when taken: JAMES2). `/#/driver/<code>` accepts a referral code or the old QR code (QR-DRIVER-001).
+- **Tour pass.** The referrer page's "Use <first name> as my guide today" saves the code in `localStorage` until midnight EAT (`frontend/src/lib/tourPass.js`). It tolerates missing storage.
+- **Open sale.** The maker's dashboard → New sale: agreed amount (whole KSh, total ≥ KSh 50 per rule 5), optional description, and optional photo consent (`producers.photo_fee`, set at registration). `open_sales` rows are single use, expire after 30 minutes, are cancellable while open, and a maker has at most one open or paying sale. Starting a payment holds the sale (`paying`). A confirmed payment makes it `paid`; a failed STK Push, a Safaricom "not paid" or an expired cash sale releases it (`open` again within its 30 minutes, else `expired`). Paid, expired and cancelled sales refuse payment with a plain message.
+- **Stand QR and checkout.** One static QR per maker opens `/#/stall/<stall code>`, which polls the public API and shows the open sale or "Waiting for the seller to enter the amount". Checkout pre-fills the tour-pass code (editable, removable) and shows the referrer's first name only. **The server computes the breakdown** (`app/sales.py`): referrer = the agreed amount × the maker's coordinator-set % (≤ 40), **rounded down** to whole shillings; maker = the rest, plus the photo fee (never split); no code = maker 100%. The parts always add up, and the maker's floor holds. Payment then runs the same M-Pesa or cash code as a price card (`transactions.start_payment`), with all of sections 4–6 unchanged.
+- **API.** Public: `GET /public/stalls/{code}`, `GET /public/sales/{id}?ref=`, `POST /public/sales/{id}/pay`. Maker only: `POST /sales`, `GET /sales/current`, `POST /sales/{id}/cancel`. `open_sales` has no browser grants, RLS with no policies, and isn't streamed by Realtime.
+- **Reconciliation** adds Referrers: sales count and commission per referral code.
+- **Tests:** `backend/scripts/verify_v2.sh` on the test project, using cash and simulated M-Pesa, never STK or B2C.
 
 ## 8. Build stages — work in this order, commit at each checkpoint
 

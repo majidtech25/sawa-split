@@ -52,7 +52,8 @@ export default function LoginPage() {
           label="PIN"
           type="password"
           inputMode="numeric"
-          autoComplete="current-password"
+          // Off: makers share phones, and a saved PIN would fill in for the wrong account.
+          autoComplete="off"
           maxLength={4}
           placeholder="••••"
           value={pin}

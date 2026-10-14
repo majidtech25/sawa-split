@@ -340,6 +340,35 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
             </section>
           )}
 
+          {data.referrers.length > 0 && (
+            <section className="mt-8">
+              <h2 className="text-lg font-semibold">Referrers</h2>
+              <p className="mt-1 text-sm text-sawa-text-muted">Sales each guide or driver referred that went through, and their share.</p>
+              <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
+                <table className="w-full min-w-[480px] border-collapse">
+                  <thead>
+                    <tr>
+                      <Th>Referrer</Th>
+                      <Th>Code</Th>
+                      <Th right>Sales</Th>
+                      <Th right>Commission</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.referrers.map((r) => (
+                      <tr key={r.referral_code}>
+                        <Td>{r.name}</Td>
+                        <Td mono>{r.referral_code}</Td>
+                        <Td right mono>{r.sales}</Td>
+                        <Td right mono>{ksh(r.commission)}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           <section className="mt-8">
             <h2 className="text-lg font-semibold">Payouts</h2>
             <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">

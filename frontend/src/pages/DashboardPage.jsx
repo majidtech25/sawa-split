@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, Wallet } from "lucide-react"
+import NewSale from "../components/NewSale"
+import ReferralCard from "../components/ReferralCard"
 import { ErrorNote, LiveIndicator, Screen, SecondaryButton, StatusBadge, TextArea } from "../components/ui"
 import { api } from "../lib/api"
 import { eatDate, eatDateTime, ksh, wasCredited } from "../lib/format"
@@ -48,6 +50,9 @@ async function loadDashboard(profile) {
     owedByMakers: Number(account.owed_by_makers),
     cashHeld: Number(account.cash_held),
     accountStatus: account.account_status,
+    referralCode: account.referral_code,
+    stallCode: account.stall_code,
+    photoFee: account.photo_fee ? Number(account.photo_fee) : null,
     closure: account.closure,
     pending: sum("pending"),
     frozen: sum("frozen"),
@@ -311,6 +316,11 @@ export default function DashboardPage() {
           </p>
         )}
       </section>
+
+      {isMaker && data.stallCode && data.accountStatus === "active" && (
+        <NewSale stallCode={data.stallCode} photoFee={data.photoFee} onChange={load} />
+      )}
+      {!isMaker && data.referralCode && <ReferralCard code={data.referralCode} />}
 
       <WithdrawPanel available={data.payable} owedToDrivers={data.owedToDrivers} withdrawals={data.withdrawals} onWithdrawn={load} />
 

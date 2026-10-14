@@ -16,12 +16,15 @@ Rehearse this as a duet, not a solo with an assistant — the driver's judgment 
 ## 2. Pre-demo setup (before judges are seated)
 
 - Laptop connected to the projector; browser zoomed to ~150% so the price-transparency card and dashboard numbers read from the back of the room.
-- **Tab 1:** tourist payment-entry screen pre-loaded for "Talek gate · beadwork" from the signed demo link below (append it to the deployed frontend URL):
-  - Payment entry (Tab 1): `#/pay/5ca4e79d-b462-4417-bd12-bd61eb9c1e10/checkout?product=100&photo=10&driver=QR-DRIVER-001&sig=4f2bb7cd0c75bedd91dbc67e6edb625121a1f32b190c5262354ee2cf5bef3bac`
-  - Price card first (the homepage's "See it work" button): `#/pay/5ca4e79d-b462-4417-bd12-bd61eb9c1e10?product=100&photo=10&driver=QR-DRIVER-001&sig=4f2bb7cd0c75bedd91dbc67e6edb625121a1f32b190c5262354ee2cf5bef3bac`
+- **Live URLs:** site https://sawa-split.onrender.com, API https://sawa-split-api.onrender.com (Render, Frankfurt; the demo Supabase project). Logins (coordinator, Wanjiru, James, Amina, Hassan) are in the git-ignored `DEMO_CREDENTIALS.local.md`; never put the coordinator PIN on screen.
+- **Wake the API first:** Render's free tier sleeps after 15 minutes idle and takes about a minute to wake. Open https://sawa-split-api.onrender.com/health and log in once, about 5 minutes before going on (or keep an uptime pinger on `/`).
+- **Tab 1 (v1 flow, the fallback):** tourist payment-entry screen pre-loaded for "Talek gate · beadwork" from the signed live demo card:
+  - Payment entry: `https://sawa-split.onrender.com/#/pay/2cfa6cbd-4b61-4f71-a632-907f511be41f/checkout?product=100&photo=10&driver=QR-DRIVER-001&sig=906b04a97b5e2debdcb88fa8ff77b028151690632037b31eb30c6251b09799d7`
+  - Price card first (the homepage's "See it work" button): `https://sawa-split.onrender.com/#/pay/2cfa6cbd-4b61-4f71-a632-907f511be41f?product=100&photo=10&driver=QR-DRIVER-001&sig=906b04a97b5e2debdcb88fa8ff77b028151690632037b31eb30c6251b09799d7`
   - Price-card links are signed with the backend's `CHECKOUT_LINK_SECRET`, so this link only works against an API using the same secret it was signed with. If the secret, producer, prices or driver change, make a new link from the coordinator's Price cards screen. Changing any value in the link by hand makes the card show "This price card isn't valid — ask the seller for a new one."
   - The price-transparency card shows the two locked components separately: Product KSh 100 (maker KSh 70, driver referral KSh 30), Photo consent KSh 10 (maker only), Total KSh 110. These are the demo producer's real configured split (30% driver), so the card shows exactly what the STK Push charges and the ledger records.
 - **Tab 2:** coordinator reconciliation/dashboard view, already logged in, ledger table visible without scrolling.
+- **v2 flow props (SCOPE_V2):** James's referral QR (his dashboard → "Show full screen", or the printed QR-DRIVER-001 card, which still works) and Wanjiru's printed stand QR (her dashboard → "Print my stand QR", opens `#/stand/WANJIRU`). Wanjiru's dashboard open on a second device for "New sale".
 - **Tab 3 (hidden until needed):** the backup screen recording, cued to 0:00, paused, audio level checked.
 - Presenter's own Safaricom phone: charged, on vibrate (the buzz is part of the moment — don't mute it), M-Pesa PIN known cold. Confirm in a dry run *before* the event that this exact number is registered and receiving Daraja sandbox STK prompts reliably.
 - Confirm venue connectivity in advance, not day-of. Bring a personal hotspot as the primary connection and venue WiFi as the fallback (or the reverse, whichever tested more reliably) — both tested ahead of time, not assumed.
@@ -38,6 +41,15 @@ Keyed to the pitch script's own stage directions in Section 3.
 6. Driver switches to **Tab 2** — the new row appears via Supabase Realtime, status flips pending → confirmed, the split is visible: maker's product share, driver referral, and the separate photo-consent line to the maker.
 7. **Pause. No narration over this moment** — the pitch script calls this out explicitly; let the ledger update speak for itself.
 8. Presenter: *"That transaction you just watched — the split is recorded and each share is credited to their balance. No one had to take our word for it."*
+
+## 3a. v2 sequence: tour pass → stall QR → pay
+
+1. Tourist phone scans James's referral QR → "James — registered Sawa Split driver" → tap **Use James as my guide today** (saved on the phone until midnight EAT).
+2. Wanjiru's dashboard → **New sale**: agreed amount (whole KSh), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for payment*.
+3. Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → the sale appears with **Guide code JAMES** already filled in and "Guide: James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly.
+4. Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash (James and Wanjiru each confirm on their dashboards). Wanjiru's status moves to *Payment in progress*, then *Paid*.
+5. Coordinator Tab 2: the sale, the split, and Referrers (JAMES: sales count and commission) update.
+6. Paying the same sale again, or an expired or cancelled one, is refused with a plain message.
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 

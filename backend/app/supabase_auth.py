@@ -56,7 +56,11 @@ async def sign_in_with_password(*, phone: str, pin: str) -> dict[str, Any]:
             json={"phone": phone, "password": pin},
         )
     if resp.status_code >= 400:
-        raise SupabaseAuthError(resp.status_code, resp.json())
+        try:
+            detail = resp.json()
+        except ValueError:  # an HTML error page from a proxy, say
+            detail = {"error_code": "non_json_response", "msg": resp.text[:120]}
+        raise SupabaseAuthError(resp.status_code, detail)
     return resp.json()
 
 
