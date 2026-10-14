@@ -28,6 +28,10 @@ MUST:
    the maker typed. No other group logic.
 9. Reconciliation: sales count and commission per referrer.
 10. Tests + docs: verify tests on the TEST project; CLAUDE.md and DEMO_SCRIPT.md updated.
+11. Login: PIN field autocomplete off (no autofill of another account's PIN); log every
+    login outcome without secrets; Supabase sign-in failure -> 503 'Couldn't sign you in
+    right now, try again in a moment'; one retry on 429/5xx; verify test: a
+    coordinator-registered account can log in with its PIN.
 
 STRETCH (only after MUST passes live, ask me first): per-person "ticket" sale: price
 per person, many payments, "N paid", maker closes, auto-close after 2 h.
