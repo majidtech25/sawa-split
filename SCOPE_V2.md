@@ -41,8 +41,9 @@ per payment; instant per-party B2C; commission caps or tiers; driver photo; sign
 result URL; self-registration; partial withdrawals; offline mode.
 
 UNCHANGED: the coordinator registers everyone; referral % fixed by the coordinator;
-cash = two confirmations, maker's share recorded as cash held, referrer's share a debt
-settled from maker M-Pesa earnings at 18:00; payouts batched, never above M-Pesa
+cash = two confirmations, maker's share recorded as cash held, referrer's share becomes
+a debt settled from the maker's M-Pesa earnings as soon as they cover it (at
+confirmation, the next M-Pesa credit, a payout attempt, or the 18:00 sweep); payouts batched, never above M-Pesa
 collected, one auto retry, pause on 8006; no platform fee.
 
 PROCESS: send me a plan of at most 10 lines FIRST and wait for my OK. Additive
