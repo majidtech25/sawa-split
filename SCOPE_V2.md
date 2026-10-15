@@ -33,12 +33,66 @@ MUST:
     right now, try again in a moment'; one retry on 429/5xx; verify test: a
     coordinator-registered account can log in with its PIN.
 
+12. Referrer page (/#/driver/<code>): clear badge "<First name> · <type> · Active" or
+    "Not active" (suspended/closed; no reason shown).
+13. Cash confirm buttons show the person's own share: "Confirm sale of KSh <total>.
+    Your share: KSh <share>" for the maker and the referrer.
+14. Navbar: "Log in" when there's no valid session (expired/missing token = logged
+    out); "Dashboard · Log out" only when logged in. Check the homepage too.
+15. Registration types (additive):
+    - referrer_type: driver | tour_guide | agent. The coordinator picks it; shown on the
+      referrer page, the referrer dashboard and Reconciliation's per-referrer table.
+      Existing: James = driver, Hassan = agent.
+    - business_type for makers: product | service. Product: photo fee optional per sale
+      (as now). Service: photography is included free in the price: no photo line, no
+      toggle, checkout shows "Photography included"; the whole price is split normally
+      (maker + referrer). No photo fee needed at registration for services.
+      Existing: Wanjiru = product, Amina = product.
+16. Checkout with a tour pass asks "Still with <name>?": Yes keeps it; "No, I'm done"
+    removes the referral AND clears the tour pass from the phone.
+17. Tours (anti code-farming):
+    - Referrer dashboard: "Start tour" with group size (1-30); one active tour per
+      referrer; it ends at midnight EAT or when he taps "End tour".
+    - A tourist JOINS by scanning the referrer QR ("Use X as my guide today") or by
+      typing the code at checkout. Joins are counted SERVER-SIDE; the tour pass stores
+      a server-issued join token, not just the code.
+    - Refused when there's no active tour ("X isn't running a tour right now") or the
+      tour is full ("X's tour is full"); the tourist then pays with no referral
+      (maker 100%).
+    - A sale earns a referral only with a valid join for an active tour.
+    - Reconciliation: tours list (referrer, date, group size, joined, sales, commission).
+    - Plan + effort estimate first; say so if large.
+18. UI pass (wording and layout only, no new business rules):
+    a) BUG CHECK FIRST: a cash sale with a referrer must not show "Cash payment
+       confirmed" to the tourist until BOTH referrer and maker have confirmed. Until
+       then the tourist sees "Waiting for the seller and guide to confirm".
+    b) Maker dashboard: "New sale" first and prominent; amount input uses a numeric
+       keypad (inputmode="numeric"); the sale card shows "You get X · <Guide> Y"
+       instead of repeating the total; the Confirm button sits inside the sale card:
+       "Cash received? Confirm sale. Your share: KSh X". Summary at the top: Today's
+       sales, Cash in hand, Owed to guides, Available to withdraw.
+    c) Referrer dashboard: confirm button reads "Confirm this sale. You earn KSh X"
+       (never "cash received"); summary: "Today: N referrals · KSh X waiting for
+       confirmation" and "Owed to you: KSh Y".
+    d) Tourist pages (stall, checkout, receipt, referrer page): no "Log in" link, just
+       the logo + "Verified checkout"; the referrer is called "Guide · <name>"; the
+       receipt shows a receipt number, "Nothing was taken out for Sawa Split" and
+       "Tip: screenshot this receipt".
+    e) Every status names the next step ("Waiting for Hassan to confirm", not
+       "confirming"). Replace the bare "Live" dot with "Updates live" or remove it.
+    Tests (TEST project): extend verify_v2.sh (tours full/inactive/no-tour, types,
+    service = no photo line, "No, I'm done"); re-run security + Stage 4. Push code
+    before any demo DB change. Live check with CASH only (start tour, join, sale,
+    confirm buttons show shares, full tour refuses), clean up, report, stop.
+    New columns must be nullable or have a default (old and new code side by side).
+
 STRETCH (only after MUST passes live, ask me first): per-person "ticket" sale: price
 per person, many payments, "N paid", maker closes, auto-close after 2 h.
 
 OUT OF SCOPE (don't build): paying each group member individually; multiple referrers
 per payment; instant per-party B2C; commission caps or tiers; driver photo; signed B2C
-result URL; self-registration; partial withdrawals; offline mode.
+result URL; self-registration; partial withdrawals; offline mode; adding a referral
+after the sale (coordinator-assisted, both parties confirm); Kiswahili toggle (roadmap).
 
 UNCHANGED: the coordinator registers everyone; referral % fixed by the coordinator;
 cash = two confirmations, maker's share recorded as cash held, referrer's share becomes
