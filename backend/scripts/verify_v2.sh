@@ -41,6 +41,7 @@ q() { psql "$DATABASE_URL" -tAc "$1"; }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(d$1 if isinstance(d, dict) else '')" 2>/dev/null; }
 source scripts/sim_mpesa.sh
 SETUP_FAILED=""
+V1_TXN="00000000-0000-0000-0000-000000000000"  # Test 14's price-card sale, once made
 CLEANUP_OK=0
 need() { [ -n "$2" ] && return 0; SETUP_FAILED="$1"; echo "FATAL: setup step failed: $1" >&2; exit 1; }
 check() {
@@ -76,10 +77,10 @@ cleanup() {
   temp_users=$(q "select string_agg(auth_user_id::text, ' ') from auth_credentials where phone in ('$TEMP_MAKER_PHONE', '$TEMP_DRIVER_PHONE', '$TEMP_SERVICE_PHONE');")
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
     begin;
-    delete from wallet_ledger_entries where transaction_id in (select id from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT'))
-      or settlement_id in (select id from cash_debts where transaction_id in (select id from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT')));
-    delete from cash_debts where transaction_id in (select id from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT'));
-    delete from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT');
+    delete from wallet_ledger_entries where transaction_id in (select id from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT') or id = '$V1_TXN')
+      or settlement_id in (select id from cash_debts where transaction_id in (select id from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT') or id = '$V1_TXN'));
+    delete from cash_debts where transaction_id in (select id from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT') or id = '$V1_TXN');
+    delete from transactions where open_sale_id in (select id from open_sales where created_at >= '$STARTED_AT') or id = '$V1_TXN';
     delete from open_sales where created_at >= '$STARTED_AT';
     delete from tour_joins where tour_id in (select id from tours where started_at >= '$STARTED_AT');
     delete from tours where started_at >= '$STARTED_AT';
@@ -348,3 +349,16 @@ call POST "/sales/$S8_ID/cancel" "$SVC" >/dev/null
 echo
 echo "== Test 13: the tour pass clears on \"No, I'm done\" (MUST 16) =="
 check "saving, reading and clearing the tour pass (node)" "$(node ../frontend/scripts/check_tour_pass.mjs 2>&1)" "ok"
+
+echo
+echo "== Test 14: a v1 signed price card still credits its driver WITHOUT a tour (MUST 1) =="
+check "no tour is running for James" "$(body_of "$(call GET /public/drivers/james)" | json "['tour_running']")" "False"
+V1_SIG=$(PYTHONPATH=. .venv/bin/python scripts/sign_link.py --sig "$PRODUCER_ID" 100 10 QR-DRIVER-001)
+V1=$(curl -s -m 60 -X POST "$BASE_URL/transactions/initiate" -H "Content-Type: application/json" \
+  -d "{\"producer_id\":\"$PRODUCER_ID\",\"driver_id\":\"$DRIVER_ID\",\"payment_method\":\"cash\",\"product_enabled\":true,\"product_amount\":100,\"photo_enabled\":true,\"photo_amount\":10,\"link_sig\":\"$V1_SIG\"}")
+V1_TXN=$(echo "$V1" | json "['id']"); need "v1 price-card cash sale" "$V1_TXN"
+check "the signed card's sale carries James's referral (30), with no tour" \
+  "$(echo "$V1" | json "['driver_amount']") $(q "select coalesce(tour_id::text, 'none') from transactions where id = '$V1_TXN';")" "30.00 none"
+call POST "/transactions/$V1_TXN/confirm" "$DRIVER" '{}' >/dev/null
+check "driver + maker confirm: confirmed, James's 30 becomes a cash debt as before" \
+  "$(body_of "$(call POST "/transactions/$V1_TXN/confirm" "$MAKER" '{}')" | json "['status']") $(q "select amount from cash_debts where transaction_id = '$V1_TXN';")" "cash_confirmed 30.00"
