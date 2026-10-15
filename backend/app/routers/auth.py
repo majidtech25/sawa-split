@@ -33,6 +33,7 @@ class OnboardProducer(BaseModel):
     charges_product: bool = True
     charges_photo: bool = False
     photo_fee: int | None = Field(default=None, gt=0)  # whole KSh; the maker's photo-consent fee for open sales
+    business_type: Literal["product", "service"] = "product"  # a service includes photography (MUST 15)
 
 
 class OnboardDriver(BaseModel):
@@ -42,6 +43,7 @@ class OnboardDriver(BaseModel):
     name: str
     till: str
     qr_code: str
+    referrer_type: Literal["driver", "tour_guide", "agent"] = "driver"  # MUST 15
 
 
 class OnboardCoordinator(BaseModel):
@@ -105,6 +107,8 @@ async def onboard(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Must charge for product, photo, or both.")
     if body.role == "producer" and body.photo_fee and not body.charges_photo:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A photo fee needs \"charges for photo consent\" ticked.")
+    if body.role == "producer" and body.business_type == "service" and (body.photo_fee or body.charges_photo):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A service includes photography in its price: no photo fee.")
 
     try:
         auth_user_id = await _create_auth_account(
@@ -127,10 +131,10 @@ async def onboard(
                         """
                         insert into producers
                             (name, phone, till, site, default_split_driver_pct, charges_product, charges_photo,
-                             photo_fee, stall_code)
+                             photo_fee, stall_code, business_type)
                         values
                             (:name, :phone, :till, :site, :default_split_driver_pct, :charges_product, :charges_photo,
-                             :photo_fee, :stall_code)
+                             :photo_fee, :stall_code, :business_type)
                         returning id, stall_code
                         """
                     ),
@@ -143,8 +147,8 @@ async def onboard(
                 await session.execute(
                     text(
                         """
-                        insert into drivers (name, phone, till, qr_code, referral_code)
-                        values (:name, :phone, :till, :qr_code, :referral_code)
+                        insert into drivers (name, phone, till, qr_code, referral_code, referrer_type)
+                        values (:name, :phone, :till, :qr_code, :referral_code, :referrer_type)
                         returning id, referral_code
                         """
                     ),

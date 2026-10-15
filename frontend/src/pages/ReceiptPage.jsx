@@ -17,7 +17,26 @@ function receiptCard(r) {
     product: r.product_amount ? { amount: r.product_amount, maker_amount: r.product_maker_amount, driver_amount: r.product_driver_amount } : null,
     photo: r.photo_amount ? { amount: r.photo_amount } : null,
     total: r.total_amount,
+    service: r.business_type === "service",
   })
+}
+
+// A short, readable reference for the tourist (MUST 18d), from the payment's own id.
+const receiptNumber = (id) => `SS-${id.replaceAll("-", "").slice(0, 8).toUpperCase()}`
+
+// The cash sale's next step, in words (MUST 18a, 18e): it isn't confirmed until both
+// required people have confirmed, and the page says who it's still waiting for.
+function cashNextStep(r) {
+  const waiting = []
+  if (r.driver_name) {
+    if (!r.maker_confirmed) waiting.push(r.producer_name)
+    if (!r.driver_confirmed) waiting.push(r.driver_name)
+    if (waiting.length === 2) return "Waiting for the seller and guide to confirm"
+  } else {
+    if (!r.tourist_confirmed) waiting.push("you")
+    if (!r.maker_confirmed) waiting.push(r.tourist_confirmed ? r.producer_name : "the seller")
+  }
+  return `Waiting for ${waiting.join(" and ")} to confirm`
 }
 
 function useCountdown(deadline) {
@@ -39,7 +58,7 @@ function ConfirmStep({ done, children }) {
     <li className={`flex items-center gap-2 text-sm ${done ? "text-sawa-green" : "text-sawa-text-muted"}`}>
       {done ? <Check aria-hidden="true" className="size-4" /> : <Hourglass aria-hidden="true" className="size-4" />}
       <span>
-        {children} {done ? "— confirmed" : "— waiting"}
+        {children} · {done ? "confirmed" : "not yet"}
       </span>
     </li>
   )
@@ -141,7 +160,9 @@ export default function ReceiptPage() {
             <StatusBadge status={receipt.status} />
             <h1 className="mt-2 text-2xl font-semibold">{isCash ? "Cash payment confirmed" : "Payment confirmed"}</h1>
             <p className="mt-1 text-[15px] text-sawa-text-muted">
-              The split is recorded and each share is credited to their balance.
+              {isCash
+                ? "Both confirmed. The split is recorded."
+                : "The split is recorded and each share is credited to their balance."}
             </p>
             {receipt.stk_receipt && (
               <p className="mt-2 font-mono text-[13px] text-sawa-text-muted">M-Pesa receipt {receipt.stk_receipt}</p>
@@ -167,15 +188,14 @@ export default function ReceiptPage() {
       {receipt.status === "cash_unconfirmed" && (
         <section aria-live="polite" className="rounded-sawa border border-dashed border-sawa-text-muted/50 bg-sawa-surface p-5">
           <StatusBadge status="cash_unconfirmed" />
-          <h1 className="mt-3 text-2xl font-semibold">Marked as cash</h1>
+          <h1 className="mt-3 text-2xl font-semibold">{cashNextStep(receipt)}</h1>
           <p className="mt-1 text-[15px] text-sawa-text-muted">
-            Confirming with {receipt.producer_name}
-            {receipt.driver_name ? ` and ${receipt.driver_name}` : ""}. Nothing is split until both confirmations are in.
+            You paid cash. Nothing is split until both confirmations are in.
           </p>
           <ul className="mt-4 flex flex-col gap-1.5">
-            <ConfirmStep done={receipt.maker_confirmed}>{receipt.producer_name} (maker)</ConfirmStep>
+            <ConfirmStep done={receipt.maker_confirmed}>Seller · {receipt.producer_name}</ConfirmStep>
             {receipt.driver_name ? (
-              <ConfirmStep done={receipt.driver_confirmed}>{receipt.driver_name} (driver)</ConfirmStep>
+              <ConfirmStep done={receipt.driver_confirmed}>Guide · {receipt.driver_name}</ConfirmStep>
             ) : (
               <ConfirmStep done={receipt.tourist_confirmed}>You</ConfirmStep>
             )}
@@ -219,6 +239,14 @@ export default function ReceiptPage() {
       )}
 
       <PriceTransparencyCard {...card} />
+
+      <section aria-label="Receipt" className="flex flex-col gap-1 text-[13px] text-sawa-text-muted">
+        <p>
+          Receipt <span className="font-mono text-sawa-text">{receiptNumber(receipt.id)}</span>
+        </p>
+        <p>Nothing was taken out for Sawa Split.</p>
+        {(receipt.status === "confirmed" || receipt.status === "cash_confirmed") && <p>Tip: screenshot this receipt.</p>}
+      </section>
     </Screen>
   )
 }

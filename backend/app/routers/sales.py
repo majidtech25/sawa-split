@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import sales
+from .. import sales, tours
 from ..caller import resolve_producer_or_driver
 from ..db import get_session
 from .public import CheckoutResponse, Party, PhotoComponent, ProductComponent
@@ -76,6 +76,7 @@ class Stall(BaseModel):
     maker: Party
     site: str | None
     stall_code: str
+    business_type: str          # product or service (a service includes photography, MUST 15)
     sale: SaleView | None       # the open (or being-paid) sale; None = waiting for the seller
 
 
@@ -95,19 +96,23 @@ async def stall(stall_code: str, session: Annotated[AsyncSession, Depends(get_se
     ).one_or_none()
     return Stall(
         maker=Party(id=str(maker.id), name=maker.name), site=maker.site, stall_code=maker.stall_code,
-        sale=_view(current) if current else None,
+        business_type=maker.business_type, sale=_view(current) if current else None,
     )
 
 
 class Quote(CheckoutResponse):
     sale: SaleView
-    referral_error: str | None  # set when the code given isn't an active referrer's
+    business_type: str          # product or service
+    referrer_type: str | None   # driver, tour_guide or agent, when the referral applies
+    referral_error: str | None  # set when the code given can't earn a referral: unknown or
+                                # inactive, no tour running, or the tour is full (MUST 17)
 
 
-async def _quote(session: AsyncSession, s, referral_code: str | None) -> Quote:
+async def _quote(session: AsyncSession, s, referral_code: str | None, join_token: str | None = None) -> Quote:
     maker = (
         await session.execute(
-            text("select id, name, site, default_split_driver_pct from producers where id = :id"), {"id": s.producer_id}
+            text("select id, name, site, default_split_driver_pct, business_type from producers where id = :id"),
+            {"id": s.producer_id},
         )
     ).one()
     referrer, error = None, None
@@ -115,6 +120,11 @@ async def _quote(session: AsyncSession, s, referral_code: str | None) -> Quote:
         referrer = await sales.referrer_by_code(session, referral_code)
         if referrer is None:
             error = UNKNOWN_CODE
+        else:
+            tour, error = await tours.check_referral(session, referrer, join_token)
+            if tour is None:
+                referrer = None
+            await session.commit()  # keeps a just-closed past tour
     pct = Decimal(maker.default_split_driver_pct)
     split = sales.compute_sale_split(s.amount, s.photo_fee, pct, referrer is not None)
     return Quote(
@@ -126,27 +136,33 @@ async def _quote(session: AsyncSession, s, referral_code: str | None) -> Quote:
         product=ProductComponent(amount=s.amount, maker_amount=split["product_maker_amount"], driver_amount=split["product_driver_amount"]),
         photo=PhotoComponent(amount=s.photo_fee) if s.photo_fee else None,
         total_amount=split["total_amount"], maker_amount=split["maker_amount"], driver_amount=split["driver_amount"],
-        sale=_view(s), referral_error=error,
+        sale=_view(s), business_type=maker.business_type,
+        referrer_type=referrer.referrer_type if referrer else None, referral_error=error,
     )
 
 
 @public_router.get("/sales/{sale_id}", response_model=Quote)
 async def quote(
-    sale_id: str, session: Annotated[AsyncSession, Depends(get_session)], ref: str | None = None
+    sale_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ref: str | None = None,
+    join: str | None = None,
 ) -> Quote:
     """The sale and its breakdown, computed here (SCOPE_V2 MUST 6), for an optional
-    referral code. An unknown or inactive code is reported, not applied."""
+    referral code and the tourist's tour join token. A code that can't earn a referral
+    (unknown, inactive, no tour, tour full) is reported, not applied. Uses up no join."""
     s = await _sale(session, sale_id)
     await session.commit()
     if s is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sale not found.")
-    return await _quote(session, s, ref)
+    return await _quote(session, s, ref, join)
 
 
 class PayRequest(BaseModel):
     payment_method: Literal["mpesa", "cash"]
     phone: str | None = None
     referral_code: str | None = None
+    join_token: str | None = None   # from the tourist's tour pass (MUST 17)
 
     @model_validator(mode="after")
     def _phone(self):
@@ -160,7 +176,10 @@ async def pay(
     sale_id: str, body: PayRequest, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> InitiateTransactionResponse:
     """Pays an open sale by M-Pesa or cash (the same flows as a price card). The sale is
-    held while the payment runs, so it can't be paid twice."""
+    held while the payment runs, so it can't be paid twice. A referral code earns its
+    share only through the referrer's running tour (MUST 17): with the tourist's join, or
+    by joining now if there's a seat; otherwise the payment is refused with the reason,
+    and the tourist can pay without the code."""
     s = await _sale(session, sale_id, lock=True)
     if s is None:
         await session.rollback()
@@ -174,12 +193,17 @@ async def pay(
     if not maker.active:
         await session.rollback()
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This maker isn't taking payments through Sawa Split right now.")
-    referrer = None
+    referrer, tour = None, None
     if body.referral_code and body.referral_code.strip():
         referrer = await sales.referrer_by_code(session, body.referral_code)
         if referrer is None:
             await session.rollback()
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, UNKNOWN_CODE)
+        try:
+            tour = await tours.referral_for_payment(session, referrer, body.join_token)
+        except tours.TourRefused as exc:
+            await session.rollback()
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     split = sales.compute_sale_split(s.amount, s.photo_fee, Decimal(maker.default_split_driver_pct), referrer is not None)
     await session.execute(text("update open_sales set status = 'paying' where id = :id"), {"id": s.id})
     return await start_payment(
@@ -192,6 +216,7 @@ async def pay(
         photo_amount=s.photo_fee,
         split=split,
         open_sale_id=s.id,
+        tour_id=tour.id if tour else None,
     )
 
 
@@ -208,6 +233,11 @@ class MakerSale(SaleView):
     referrer_first_name: str | None   # once a payment has started
     payment_method: str | None
     payment_status: str | None        # the latest payment's transaction status
+    transaction_id: str | None        # the latest payment, for the Confirm button in the sale card
+    maker_amount: Decimal | None      # the latest payment's split: "You get X · <Guide> Y"
+    driver_amount: Decimal | None
+    maker_confirmed: bool = False     # cash: who has confirmed so far
+    driver_confirmed: bool = False
 
 
 async def _producer_id(session: AsyncSession, authorization: str | None) -> str:
@@ -221,7 +251,8 @@ async def _maker_sale(session: AsyncSession, s) -> MakerSale:
     payment = (
         await session.execute(
             text(
-                "select t.payment_method, t.status, d.name as driver_name from transactions t "
+                "select t.id, t.payment_method, t.status, t.maker_amount, t.driver_amount, t.maker_confirmed_at, "
+                "t.driver_confirmed_at, d.name as driver_name from transactions t "
                 "left join drivers d on d.id = t.driver_id where t.open_sale_id = :id order by t.created_at desc limit 1"
             ),
             {"id": s.id},
@@ -232,6 +263,11 @@ async def _maker_sale(session: AsyncSession, s) -> MakerSale:
         referrer_first_name=sales.first_name(payment.driver_name) if payment and payment.driver_name else None,
         payment_method=payment.payment_method if payment else None,
         payment_status=payment.status if payment else None,
+        transaction_id=str(payment.id) if payment else None,
+        maker_amount=payment.maker_amount if payment else None,
+        driver_amount=payment.driver_amount if payment else None,
+        maker_confirmed=bool(payment and payment.maker_confirmed_at),
+        driver_confirmed=bool(payment and payment.driver_confirmed_at),
     )
 
 
@@ -242,7 +278,9 @@ async def create_sale(
     pid = await _producer_id(session, authorization)
     if body.amount != body.amount.to_integral_value():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Enter the amount in whole shillings, with no cents.")
-    maker = (await session.execute(text("select photo_fee from producers where id = :id"), {"id": pid})).one()
+    maker = (await session.execute(text("select photo_fee, business_type from producers where id = :id"), {"id": pid})).one()
+    if body.photo and maker.business_type == "service":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Photography is included in a service's price.")
     if body.photo and not maker.photo_fee:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "You don't have a photo-consent fee set.")
     photo_fee = maker.photo_fee if body.photo else None

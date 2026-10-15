@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import links, payouts, verification
+from .. import tours as tours_lib
 from ..db import get_session
 from .public import build_checkout
 from ..security import require_admin
@@ -85,13 +86,27 @@ class PayoutPause(BaseModel):
 class ReferrerRow(BaseModel):
     name: str
     referral_code: str
+    referrer_type: str          # driver, tour_guide or agent (MUST 15)
     sales: int                  # referred sales that went through (M-Pesa confirmed, cash confirmed, disputed)
     commission: Decimal         # their shares of those sales
+
+
+class TourRow(BaseModel):
+    id: str
+    referrer_name: str
+    referral_code: str
+    started_at: str
+    ended_at: str | None        # None while it's running
+    group_size: int
+    joined: int
+    sales: int                  # referred sales on the tour that went through
+    commission: Decimal
 
 
 class ReconciliationResponse(BaseModel):
     totals: Totals
     referrers: list[ReferrerRow]  # SCOPE_V2 MUST 9
+    tours: list[TourRow]          # SCOPE_V2 MUST 17, newest first
     payouts_paused: PayoutPause | None  # set while every payout is stopped (migration 0015)
     payment_checks: list[PaymentCheck]
     debts: list[DebtRow]
@@ -213,11 +228,31 @@ async def reconciliation(
         await session.execute(
             text(
                 """
-                select d.name, d.referral_code, count(t.id) as sales, coalesce(sum(t.driver_amount), 0) as commission
+                select d.name, d.referral_code, d.referrer_type, count(t.id) as sales,
+                       coalesce(sum(t.driver_amount), 0) as commission
                 from drivers d
                 left join transactions t on t.driver_id = d.id and t.status in ('confirmed', 'cash_confirmed', 'disputed')
-                group by d.id, d.name, d.referral_code
+                group by d.id, d.name, d.referral_code, d.referrer_type
                 order by commission desc, d.name
+                """
+            )
+        )
+    ).all()
+    await tours_lib.close_past(session)
+    await session.commit()
+    tour_rows = (
+        await session.execute(
+            text(
+                """
+                select tr.id, d.name, d.referral_code, tr.started_at, tr.ended_at, tr.group_size,
+                       (select count(*) from tour_joins j where j.tour_id = tr.id) as joined,
+                       (select count(*) from transactions t where t.tour_id = tr.id
+                          and t.status in ('confirmed', 'cash_confirmed', 'disputed')) as sales,
+                       (select coalesce(sum(t.driver_amount), 0) from transactions t where t.tour_id = tr.id
+                          and t.status in ('confirmed', 'cash_confirmed', 'disputed')) as commission
+                from tours tr join drivers d on d.id = tr.driver_id
+                order by tr.started_at desc
+                limit 100
                 """
             )
         )
@@ -225,7 +260,18 @@ async def reconciliation(
     pause = await payouts.active_pause(session)
     return ReconciliationResponse(
         totals=totals,
-        referrers=[ReferrerRow(name=r.name, referral_code=r.referral_code, sales=r.sales, commission=r.commission) for r in referrers],
+        referrers=[
+            ReferrerRow(name=r.name, referral_code=r.referral_code, referrer_type=r.referrer_type, sales=r.sales, commission=r.commission)
+            for r in referrers
+        ],
+        tours=[
+            TourRow(
+                id=str(r.id), referrer_name=r.name, referral_code=r.referral_code, started_at=r.started_at.isoformat(),
+                ended_at=r.ended_at.isoformat() if r.ended_at else None, group_size=r.group_size, joined=r.joined,
+                sales=r.sales, commission=r.commission,
+            )
+            for r in tour_rows
+        ],
         payouts_paused=PayoutPause(result_code=pause.result_code, reason=pause.reason, paused_at=pause.paused_at.isoformat())
         if pause else None,
         payment_checks=[

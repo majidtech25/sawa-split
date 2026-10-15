@@ -30,6 +30,15 @@ export function currentProfile() {
   }
 }
 
+// Drops a profile whose Supabase session is gone (expired or signed out elsewhere).
+export function forgetProfile() {
+  try {
+    localStorage.removeItem(PROFILE_KEY)
+  } catch {
+    // nothing stored
+  }
+}
+
 export async function endSession() {
   localStorage.removeItem(PROFILE_KEY)
   await supabase.auth.signOut()

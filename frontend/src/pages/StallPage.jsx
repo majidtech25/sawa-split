@@ -6,7 +6,7 @@ import { ErrorNote, Field, PayButton, Screen, SecondaryButton } from "../compone
 import { api } from "../lib/api"
 import { cardFromCheckout } from "../lib/checkout"
 import { ksh } from "../lib/format"
-import { readTourPass } from "../lib/tourPass"
+import { canSaveTourPass, clearTourPass, readTourPass, saveTourPass } from "../lib/tourPass"
 
 const POLL_MS = 3000
 const PHONE_PATTERN = /^(\+?254|0)?[17]\d{8}$/
@@ -72,7 +72,11 @@ export default function StallPage() {
 
 function SaleCheckout({ sale, onPaying }) {
   const navigate = useNavigate()
+  const [pass, setPass] = useState(readTourPass)
+  // MUST 16: with a tour pass, the tourist first says whether they're still with that guide.
+  const [stillWith, setStillWith] = useState(() => (readTourPass() ? null : false))
   const [code, setCode] = useState(() => readTourPass()?.code || "")
+  const [requote, setRequote] = useState(0)
   const [quote, setQuote] = useState(null)
   const [quoteError, setQuoteError] = useState(null)
   const [phone, setPhone] = useState("")
@@ -81,13 +85,19 @@ function SaleCheckout({ sale, onPaying }) {
   const [busy, setBusy] = useState(null)
   const timer = useRef(null)
 
-  // The breakdown always comes from the server (SCOPE_V2 MUST 6), for the code as typed.
+  // The pass's join token counts only for the guide it was issued for.
+  const joinToken = pass?.joinToken && pass.code.toUpperCase() === code.trim().toUpperCase() ? pass.joinToken : null
+
+  // The breakdown always comes from the server (SCOPE_V2 MUST 6), for the code as typed
+  // and the tourist's join to that guide's tour (MUST 17).
   useEffect(() => {
     clearTimeout(timer.current)
     let live = true
     timer.current = setTimeout(() => {
-      const ref = code.trim()
-      api(`/public/sales/${sale.id}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`)
+      const query = new URLSearchParams()
+      if (code.trim()) query.set("ref", code.trim())
+      if (joinToken) query.set("join", joinToken)
+      api(`/public/sales/${sale.id}${query.toString() ? `?${query}` : ""}`)
         .then((q) => {
           if (!live) return
           setQuote(q)
@@ -99,15 +109,34 @@ function SaleCheckout({ sale, onPaying }) {
       live = false
       clearTimeout(timer.current)
     }
-  }, [code, sale.id])
+  }, [code, joinToken, sale.id, requote])
 
   const codeProblem = code.trim() && quote?.referral_error
   const validCode = quote?.driver && !quote.referral_error ? code.trim() : null
 
+  function doneWithGuide() {
+    clearTourPass()
+    setPass(null)
+    setCode("")
+    setStillWith(false)
+  }
+
+  // A code typed here joins that guide's tour first, so the join is counted once and
+  // the next stall reuses it (MUST 17).
+  async function ensureJoin() {
+    if (!validCode || joinToken) return joinToken
+    const joined = await api(`/public/drivers/${encodeURIComponent(validCode)}/join`, { method: "POST" })
+    if (canSaveTourPass()) {
+      saveTourPass(joined.referral_code, joined.first_name, joined.join_token)
+      setPass(readTourPass())
+    }
+    return joined.join_token
+  }
+
   async function pay(method) {
     setSubmitError(null)
     if (codeProblem) {
-      setSubmitError("Fix the guide code, or remove it, before paying.")
+      setSubmitError("Remove the guide code to pay without a guide, or fix it.")
       return
     }
     const body = { payment_method: method, referral_code: validCode }
@@ -123,6 +152,13 @@ function SaleCheckout({ sale, onPaying }) {
     setBusy(method)
     onPaying(true)
     try {
+      try {
+        body.join_token = await ensureJoin()
+      } catch (err) {
+        // No tour running, or it just filled up: show why, with the new breakdown.
+        setRequote((n) => n + 1)
+        throw err
+      }
       const txn = await api(`/public/sales/${sale.id}/pay`, { method: "POST", body })
       navigate(`/receipt/${txn.id}${txn.tourist_confirm_token ? `?t=${encodeURIComponent(txn.tourist_confirm_token)}` : ""}`)
     } catch (err) {
@@ -130,6 +166,21 @@ function SaleCheckout({ sale, onPaying }) {
       setBusy(null)
       onPaying(false)
     }
+  }
+
+  if (stillWith === null) {
+    return (
+      <section aria-label="Your guide" className="flex flex-col gap-3 rounded-sawa border border-sawa-border bg-sawa-surface p-5">
+        <h2 className="text-lg font-semibold">Still with {pass.firstName || pass.code}?</h2>
+        <p className="text-[13px] text-sawa-text-muted">
+          If {pass.firstName || "your guide"} brought you here, they get their disclosed share of this sale.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <SecondaryButton onClick={() => setStillWith(true)}>Yes</SecondaryButton>
+          <SecondaryButton onClick={doneWithGuide}>No, I'm done</SecondaryButton>
+        </div>
+      </section>
+    )
   }
 
   return (
@@ -150,7 +201,7 @@ function SaleCheckout({ sale, onPaying }) {
         />
         {quote?.driver && !codeProblem && (
           <p className="flex items-center gap-2 text-sm text-sawa-green">
-            <Check aria-hidden="true" className="size-4 shrink-0" /> Guide: {quote.driver.name}
+            <Check aria-hidden="true" className="size-4 shrink-0" /> Guide · {quote.driver.name}
           </p>
         )}
         {code && (
@@ -167,7 +218,8 @@ function SaleCheckout({ sale, onPaying }) {
       {quote?.driver && (
         <p className="text-[13px] text-sawa-text-muted">
           {quote.driver.name}'s share is the {Number(quote.driver_split_pct)}% guide referral the maker agreed with the
-          coordinator, rounded down to whole shillings. Everything else goes to the maker. Nothing goes to Sawa Split.
+          coordinator, rounded down to whole shillings. Everything else goes to the maker. Nothing is taken out for Sawa
+          Split.
         </p>
       )}
 

@@ -31,17 +31,20 @@ export function useCheckout(producerId, search) {
 
 // Shapes the API's checkout (or a receipt) into PriceTransparencyCard's props: one
 // card per component, never merged (CLAUDE.md rule 1), photo never split (rule 2).
-export function cardProps({ site, producerName, driverName, product, photo, total }) {
+// A service includes photography in its price (SCOPE_V2 MUST 15): no photo line, a note
+// instead, and the whole price splits as usual.
+export function cardProps({ site, producerName, driverName, product, photo, total, service = false }) {
   const components = []
   if (product) {
     components.push({
       key: "product",
-      label: "Product",
+      label: service ? "Service" : "Product",
       amount: product.amount,
+      note: service ? "Photography included" : null,
       breakdown: driverName
         ? [
             { label: `Maker · ${producerName}`, amount: product.maker_amount, highlight: true },
-            { label: `Driver referral · ${driverName}`, amount: product.driver_amount },
+            { label: `Guide · ${driverName}`, amount: product.driver_amount },
           ]
         : [{ label: `Maker · ${producerName}`, amount: product.amount, highlight: true }],
     })
@@ -65,5 +68,6 @@ export function cardFromCheckout(c) {
     product: c.product,
     photo: c.photo,
     total: c.total_amount,
+    service: c.business_type === "service",
   })
 }

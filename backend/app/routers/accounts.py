@@ -59,6 +59,13 @@ class AccountSummary(BaseModel):
     referral_code: str | None   # driver: their code, for their personal QR (SCOPE_V2)
     stall_code: str | None      # maker: their stand QR's code
     photo_fee: Decimal | None   # maker: their photo-consent fee, if any
+    business_type: str | None   # maker: product or service (MUST 15)
+    referrer_type: str | None   # driver: driver, tour_guide or agent
+    # The dashboard's summary (MUST 18), today = since midnight EAT:
+    today_sales: int            # sales (maker) or referrals (driver) today, not failed or expired
+    today_total: Decimal        # maker: those sales' totals
+    waiting_confirmation: Decimal  # their shares of cash sales still waiting for a confirmation
+    owed_to_me: Decimal         # driver: not yet paid out (clearing + available + owed by makers)
     closure: ClosureRequest | None  # their latest closure request, if any
 
 
@@ -85,25 +92,66 @@ async def my_account(
             {"id": party_id},
         )
     ).scalar_one() if rtype == "maker" else Decimal(0)
+    today = (
+        await session.execute(
+            text(
+                f"""
+                select count(*) as n, coalesce(sum(total_amount), 0) as total
+                from transactions
+                where {"producer_id" if rtype == "maker" else "driver_id"} = :id
+                  and status in ('initiated', 'verifying', 'confirmed', 'disputed', 'cash_unconfirmed', 'cash_confirmed')
+                  and created_at >= date_trunc('day', now() at time zone 'Africa/Nairobi') at time zone 'Africa/Nairobi'
+                """
+            ),
+            {"id": party_id},
+        )
+    ).one()
+    waiting = (
+        await session.execute(
+            text(
+                f"select coalesce(sum({'maker_amount' if rtype == 'maker' else 'driver_amount'}), 0) from transactions "
+                f"where {'producer_id' if rtype == 'maker' else 'driver_id'} = :id and status = 'cash_unconfirmed'"
+            ),
+            {"id": party_id},
+        )
+    ).scalar_one()
+    clearing = (
+        await session.execute(
+            text(
+                "select coalesce(sum(amount), 0) from wallet_ledger_entries "
+                "where recipient_type = :t and recipient_id = :id and status = 'pending'"
+            ),
+            {"t": rtype, "id": party_id},
+        )
+    ).scalar_one()
+    available = await available_balance(session, rtype, party_id)
     return AccountSummary(
         role=role,
-        available=await available_balance(session, rtype, party_id),
+        available=available,
         payable=await payable_balance(session, rtype, party_id),
         owed_to_drivers=owed_to_drivers,
         owed_by_makers=owed_by_makers,
         cash_held=cash_held,
         account_status=(await lifecycle.party(session, rtype, party_id)).account_status,
         **(await _codes(session, rtype, party_id)),
+        today_sales=today.n,
+        today_total=today.total if rtype == "maker" else Decimal(0),
+        waiting_confirmation=waiting,
+        owed_to_me=clearing + available + owed_by_makers if rtype == "driver" else Decimal(0),
         closure=_closure(await _latest_closure(session, rtype, party_id)),
     )
 
 
 async def _codes(session: AsyncSession, rtype: str, party_id) -> dict:
     if rtype == "driver":
-        code = (await session.execute(text("select referral_code from drivers where id = :id"), {"id": party_id})).scalar_one()
-        return {"referral_code": code, "stall_code": None, "photo_fee": None}
-    row = (await session.execute(text("select stall_code, photo_fee from producers where id = :id"), {"id": party_id})).one()
-    return {"referral_code": None, "stall_code": row.stall_code, "photo_fee": row.photo_fee}
+        row = (await session.execute(text("select referral_code, referrer_type from drivers where id = :id"), {"id": party_id})).one()
+        return {"referral_code": row.referral_code, "referrer_type": row.referrer_type, "stall_code": None, "photo_fee": None,
+                "business_type": None}
+    row = (
+        await session.execute(text("select stall_code, photo_fee, business_type from producers where id = :id"), {"id": party_id})
+    ).one()
+    return {"referral_code": None, "referrer_type": None, "stall_code": row.stall_code, "photo_fee": row.photo_fee,
+            "business_type": row.business_type}
 
 
 class ClosureRequestBody(BaseModel):

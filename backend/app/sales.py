@@ -46,17 +46,19 @@ def first_name(name: str) -> str:
     return name.split()[0] if name.split() else name
 
 
-async def referrer_by_code(session: AsyncSession, code: str):
+async def referrer_by_code(session: AsyncSession, code: str, *, active_only: bool = True):
     """The driver whose referral code (case-insensitive) or old QR code this is, or None.
-    Inactive (suspended, closing, closed) referrers count as unknown."""
+    Inactive (suspended, closing, closed) referrers count as unknown, unless active_only
+    is False (the referrer page's "Not active" badge, MUST 12)."""
     code = (code or "").strip()
     if not code:
         return None
     return (
         await session.execute(
             text(
-                "select id, name, referral_code from drivers where active and "
-                "(lower(referral_code) = lower(:code) or qr_code = :code)"
+                "select id, name, referral_code, referrer_type, active from drivers where "
+                + ("active and " if active_only else "")
+                + "(lower(referral_code) = lower(:code) or qr_code = :code)"
             ),
             {"code": code},
         )
@@ -67,7 +69,7 @@ async def maker_by_stall_code(session: AsyncSession, code: str):
     return (
         await session.execute(
             text(
-                "select id, name, site, active, photo_fee, default_split_driver_pct, stall_code "
+                "select id, name, site, active, photo_fee, default_split_driver_pct, stall_code, business_type "
                 "from producers where lower(stall_code) = lower(:code)"
             ),
             {"code": (code or "").strip()},

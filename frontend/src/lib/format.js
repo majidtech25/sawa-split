@@ -29,3 +29,7 @@ export const eatDateTime = (iso) => `${eatDate(iso)}, ${eatTime(iso)}`
 // A sale still "Payment being verified" (STK_QUERY_MODE=enforce) isn't credited yet either.
 const NEVER_CREDITED = new Set(["failed", "cash_expired", "verifying", "initiated"])
 export const wasCredited = (status) => !NEVER_CREDITED.has(status)
+
+// A referrer's type, as the coordinator set it (SCOPE_V2 MUST 15).
+export const REFERRER_TYPE = { driver: "Driver", tour_guide: "Tour guide", agent: "Agent" }
+export const referrerType = (type) => REFERRER_TYPE[type] || "Guide"

@@ -13,7 +13,7 @@ function ComponentRow({ label, amount, highlight = false }) {
   )
 }
 
-function ComponentCard({ label, amount, breakdown }) {
+function ComponentCard({ label, amount, note, breakdown }) {
   return (
     <div className="rounded-sawa border border-sawa-border bg-sawa-surface p-4">
       <div className="flex items-center justify-between">
@@ -25,6 +25,7 @@ function ComponentCard({ label, amount, breakdown }) {
           <ComponentRow key={row.label} {...row} />
         ))}
       </div>
+      {note && <p className="mt-2 text-[13px] text-sawa-text-muted">{note}</p>}
     </div>
   )
 }

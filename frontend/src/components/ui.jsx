@@ -105,16 +105,17 @@ function PendingDot() {
 
 // Every status is an icon AND a word, never color alone. The M-Pesa states keep
 // the design system's three (pending / confirmed / failed); the cash states read as
-// "still resolving", visibly different from both those and a dispute.
+// "still resolving", visibly different from both those and a dispute. A pending state
+// names what it's waiting for (SCOPE_V2 MUST 18e).
 const STATUS = {
-  initiated: { label: "Pending", icon: <PendingDot />, tone: "text-sawa-text-muted" },
+  initiated: { label: "Waiting for the M-Pesa PIN", icon: <PendingDot />, tone: "text-sawa-text-muted" },
   // Enforce mode: the callback said paid; Safaricom hasn't confirmed it yet, so nobody is credited.
-  verifying: { label: "Payment being verified", icon: <PendingDot />, tone: "text-sawa-text-muted" },
+  verifying: { label: "Waiting for Safaricom to verify", icon: <PendingDot />, tone: "text-sawa-text-muted" },
   confirmed: { label: "Confirmed", icon: <Check aria-hidden="true" className="size-3.5" />, tone: "text-sawa-green" },
   failed: { label: "Failed", icon: <AlertTriangle aria-hidden="true" className="size-3.5" />, tone: "text-sawa-terracotta" },
   disputed: { label: "Disputed", icon: <Flag aria-hidden="true" className="size-3.5" />, tone: "text-sawa-text font-semibold" },
   cash_unconfirmed: {
-    label: "Cash · confirming",
+    label: "Cash · waiting for confirmation",
     icon: <Hourglass aria-hidden="true" className="size-3.5" />,
     tone: "text-sawa-text-muted",
     chip: "border border-dashed border-sawa-text-muted/50 rounded-sawa px-1.5",
@@ -172,7 +173,7 @@ export function LiveIndicator({ live }) {
         aria-hidden="true"
         className={`size-2 rounded-full ${live ? "bg-sawa-green motion-safe:animate-pulse" : "bg-sawa-border"}`}
       />
-      {live ? "Live" : "Connecting…"}
+      {live ? "Updates live" : "Connecting…"}
     </span>
   )
 }

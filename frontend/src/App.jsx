@@ -12,7 +12,8 @@ import AccountsPage from "./pages/AccountsPage"
 import CoordinatorPage from "./pages/CoordinatorPage"
 import PriceCardsPage from "./pages/PriceCardsPage"
 import RegisterPage from "./pages/RegisterPage"
-import { currentProfile, endSession, supabase } from "./lib/supabase"
+import { ShieldCheck } from "lucide-react"
+import { currentProfile, endSession, forgetProfile, supabase } from "./lib/supabase"
 
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
@@ -32,12 +33,35 @@ const ROLE_HOME = {
 const navLink = ({ isActive }) =>
   `whitespace-nowrap ${focusRing} ${isActive ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"}`
 
+// The signed-in profile, only while Supabase holds a live session (SCOPE_V2 MUST 14):
+// a missing or expired token (one that can't be refreshed) means logged out, and the
+// stale profile is dropped. `checked` is false until Supabase has answered.
+function useSession() {
+  const [state, setState] = useState({ checked: false, profile: null })
+  useEffect(() => {
+    let live = true
+    const apply = (session) => {
+      const valid = Boolean(session && session.expires_at * 1000 > Date.now())
+      if (!valid) forgetProfile()
+      if (live) setState({ checked: true, profile: valid ? currentProfile() : null })
+    }
+    supabase.auth.getSession().then(({ data }) => apply(data.session))
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => apply(session))
+    return () => {
+      live = false
+      data.subscription.unsubscribe()
+    }
+  }, [])
+  return state
+}
+
 // Signed in: the role's home link (or the coordinator's nav) and "Log out". Signed
 // out: "Log in". There's no sign-up link: accounts are created by a coordinator.
-function AppHeader({ width = "card", nav = null }) {
+// Tourist pages show neither, just "Verified checkout" (MUST 18d).
+function AppHeader({ width = "card", nav = null, tourist = false }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
-  const profile = currentProfile()
+  const { checked, profile } = useSession()
   const home = profile && ROLE_HOME[profile.role]
   async function logOut() {
     await endSession()
@@ -52,15 +76,24 @@ function AppHeader({ width = "card", nav = null }) {
         </Link>
         {nav && <div className="order-last w-full text-sm md:order-none md:ml-auto md:w-auto">{nav}</div>}
         <div className={`ml-auto flex items-center gap-4 text-sm ${nav ? "md:ml-0" : ""}`}>
-          {home && !nav && (
-            <NavLink to={home.to} end className={navLink}>
-              {home.label}
-            </NavLink>
-          )}
-          {profile ? (
-            <button type="button" onClick={logOut} className={`whitespace-nowrap text-sawa-text-muted hover:text-sawa-text ${focusRing}`}>
-              Log out
-            </button>
+          {tourist ? (
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sawa-green">
+              <ShieldCheck aria-hidden="true" className="size-4" /> Verified checkout
+            </span>
+          ) : !checked ? null : profile ? (
+            <>
+              {home && !nav && (
+                <>
+                  <NavLink to={home.to} end className={navLink}>
+                    {home.label}
+                  </NavLink>
+                  <span aria-hidden="true" className="-mx-2 text-sawa-text-muted">·</span>
+                </>
+              )}
+              <button type="button" onClick={logOut} className={`whitespace-nowrap text-sawa-text-muted hover:text-sawa-text ${focusRing}`}>
+                Log out
+              </button>
+            </>
           ) : (
             pathname !== "/login" && (
               <Link to="/login" className={`whitespace-nowrap text-sawa-green hover:underline ${focusRing}`}>
@@ -96,21 +129,16 @@ function CoordinatorNav() {
 // Sends anyone without a live session for the right role to the login screen. The
 // API and Row Level Security enforce access regardless; this only routes people.
 function RequireRole({ roles, children }) {
-  const profile = currentProfile()
-  const [state, setState] = useState("checking")
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setState(data.session ? "ok" : "none"))
-  }, [])
+  const { checked, profile } = useSession()
+  if (!checked) return null
   if (!profile || !roles.includes(profile.role)) return <Navigate to="/login" replace />
-  if (state === "none") return <Navigate to="/login" replace />
-  if (state === "checking") return null
   return children
 }
 
 function TouristScreen({ children }) {
   return (
     <>
-      <AppHeader />
+      <AppHeader tourist />
       {children}
     </>
   )
@@ -146,7 +174,7 @@ export default function App() {
         <Route path="/stall/:code" element={<TouristScreen><StallPage /></TouristScreen>} />
         <Route path="/stand/:code" element={<StandPage />} />
         <Route path="/receipt/:transactionId" element={<TouristScreen><ReceiptPage /></TouristScreen>} />
-        <Route path="/login" element={<TouristScreen><LoginPage /></TouristScreen>} />
+        <Route path="/login" element={<><AppHeader /><LoginPage /></>} />
         <Route path="/dashboard" element={<MemberScreen><DashboardPage /></MemberScreen>} />
         <Route path="/coordinator" element={<CoordinatorScreen><CoordinatorPage /></CoordinatorScreen>} />
         <Route path="/coordinator/register" element={<CoordinatorScreen><RegisterPage /></CoordinatorScreen>} />

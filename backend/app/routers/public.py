@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import links, sales
+from .. import links, sales, tours
 from ..db import get_session
 from ..ledger import compute_split
 from .transactions import MIN_TRANSACTION_AMOUNT, require_whole_shillings
@@ -129,20 +129,57 @@ async def build_checkout(session: AsyncSession, producer_id: str, product, photo
 class DriverVerification(BaseModel):
     first_name: str
     referral_code: str          # for the tourist's tour pass, whichever code was scanned
+    referrer_type: str          # driver, tour_guide or agent (MUST 15)
+    active: bool                # False: suspended or closed; the badge says "Not active", no reason (MUST 12)
+    tour_running: bool          # MUST 17: whether a tourist can join right now
+    tour_full: bool
 
 
 @router.get("/drivers/{qr_code}", response_model=DriverVerification)
 async def verify_driver(
     qr_code: str, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> DriverVerification:
-    """What a camera scan of a driver's QR card opens: proof the driver is registered.
-    Takes the referral code (case-insensitive, e.g. JAMES) or the old QR code
-    (QR-DRIVER-001). First name only. An unknown code and an inactive driver get the
-    same 404, so the page never reveals that a code once existed."""
-    driver = await sales.referrer_by_code(session, qr_code)
+    """What a camera scan of a driver's QR card opens: proof the referrer is registered,
+    and whether they're active and running a tour. Takes the referral code
+    (case-insensitive, e.g. JAMES) or the old QR code (QR-DRIVER-001). First name only:
+    no phone, Till, earnings, or why an account isn't active."""
+    driver = await sales.referrer_by_code(session, qr_code, active_only=False)
     if driver is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "This isn't a registered Sawa Split driver.")
-    return DriverVerification(first_name=sales.first_name(driver.name), referral_code=driver.referral_code)
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This isn't a registered Sawa Split guide.")
+    tour = await tours.open_tour(session, driver.id) if driver.active else None
+    full = tour is not None and await tours.joined(session, tour.id) >= tour.group_size
+    await session.commit()  # keeps a just-closed past tour
+    return DriverVerification(
+        first_name=sales.first_name(driver.name), referral_code=driver.referral_code,
+        referrer_type=driver.referrer_type, active=driver.active, tour_running=tour is not None, tour_full=full,
+    )
+
+
+class JoinResponse(BaseModel):
+    join_token: str             # kept in the tourist's tour pass; only its hash is stored
+    first_name: str
+    referral_code: str
+    ends_at: str                # the tour's midnight EAT
+
+
+@router.post("/drivers/{code}/join", response_model=JoinResponse, status_code=status.HTTP_201_CREATED)
+async def join_tour(code: str, session: Annotated[AsyncSession, Depends(get_session)]) -> JoinResponse:
+    """A tourist joins the referrer's running tour ("Use X as my guide today", or the
+    code typed at checkout). Counted here, on the server (MUST 17). Refused with the
+    reason when there's no tour running or it's full."""
+    driver = await sales.referrer_by_code(session, code)
+    if driver is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That guide code isn't registered with Sawa Split.")
+    try:
+        token, tour = await tours.join(session, driver)
+    except tours.TourRefused as exc:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await session.commit()
+    return JoinResponse(
+        join_token=token, first_name=sales.first_name(driver.name), referral_code=driver.referral_code,
+        ends_at=tour.ends_at.isoformat(),
+    )
 
 
 class ReceiptResponse(BaseModel):
@@ -152,6 +189,7 @@ class ReceiptResponse(BaseModel):
     producer_name: str
     site: str | None
     driver_name: str | None
+    business_type: str
     product_amount: Decimal | None
     product_maker_amount: Decimal | None
     product_driver_amount: Decimal | None
@@ -173,7 +211,7 @@ async def receipt(transaction_id: str, session: Annotated[AsyncSession, Depends(
         await session.execute(
             text(
                 """
-                select t.*, p.name as producer_name, p.site, d.name as driver_name
+                select t.*, p.name as producer_name, p.site, p.business_type, d.name as driver_name
                 from transactions t
                 join producers p on p.id = t.producer_id
                 left join drivers d on d.id = t.driver_id
@@ -191,7 +229,8 @@ async def receipt(transaction_id: str, session: Annotated[AsyncSession, Depends(
         payment_method=row.payment_method,
         producer_name=row.producer_name,
         site=row.site,
-        driver_name=row.driver_name,
+        driver_name=sales.first_name(row.driver_name) if row.driver_name else None,  # first name only, as at checkout
+        business_type=row.business_type,
         product_amount=row.product_amount,
         product_maker_amount=row.product_maker_amount,
         product_driver_amount=row.product_driver_amount,

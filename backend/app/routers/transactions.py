@@ -108,6 +108,7 @@ async def start_payment(
     photo_amount: Decimal | None,
     split: dict,
     open_sale_id=None,
+    tour_id=None,
 ) -> InitiateTransactionResponse:
     """Creates the transaction and starts the payment: the M-Pesa STK Push, or a cash sale
     waiting for its two confirmations (rule 12). Shared by the signed price card
@@ -135,11 +136,11 @@ async def start_payment(
                 insert into transactions
                     (producer_id, driver_id, payment_method, product_enabled, product_amount,
                      product_maker_amount, product_driver_amount, photo_enabled, photo_amount,
-                     total_amount, maker_amount, driver_amount, status, confirmation_deadline, open_sale_id)
+                     total_amount, maker_amount, driver_amount, status, confirmation_deadline, open_sale_id, tour_id)
                 values
                     (:producer_id, :driver_id, :payment_method, :product_enabled, :product_amount,
                      :product_maker_amount, :product_driver_amount, :photo_enabled, :photo_amount,
-                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline, :open_sale_id)
+                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline, :open_sale_id, :tour_id)
                 returning id
                 """
             ),
@@ -159,6 +160,7 @@ async def start_payment(
                 "status": txn_status,
                 "confirmation_deadline": confirmation_deadline,
                 "open_sale_id": open_sale_id,
+                "tour_id": tour_id,
             },
         )
     ).one()

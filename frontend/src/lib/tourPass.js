@@ -1,7 +1,9 @@
-// The tour pass (SCOPE_V2 MUST 3): a guide's referral code saved on the tourist's own
-// phone until midnight EAT, so every stall's checkout fills it in. localStorage can be
-// missing or throw (private mode, blocked storage); then there's simply no pass and the
-// tourist can still type the code at checkout.
+// The tour pass (SCOPE_V2 MUST 3 and 17): the tourist's join to a guide's tour, saved on
+// their own phone until midnight EAT, so every stall's checkout fills in the guide. It
+// holds the join token the server issued when they joined (the server counts joins; a
+// code alone earns the guide nothing). localStorage can be missing or throw (private
+// mode, blocked storage); then there's simply no pass and the tourist can still type the
+// code at checkout, which joins the tour there.
 
 const KEY = "sawa.tourPass"
 
@@ -12,9 +14,21 @@ function nextMidnightEAT(now = Date.now()) {
   return midnightUtc - 3 * 3600 * 1000
 }
 
-export function saveTourPass(code, firstName) {
+// Whether this browser can keep a pass at all, checked before joining a tour so a join
+// (which takes a seat) is never wasted on a phone that can't remember it.
+export function canSaveTourPass() {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ code, firstName, until: nextMidnightEAT() }))
+    localStorage.setItem(`${KEY}.probe`, "1")
+    localStorage.removeItem(`${KEY}.probe`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function saveTourPass(code, firstName, joinToken) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ code, firstName, joinToken, until: nextMidnightEAT() }))
     return true
   } catch {
     return false

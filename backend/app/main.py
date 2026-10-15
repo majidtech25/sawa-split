@@ -12,7 +12,7 @@ from . import login_limits
 from .config import settings
 from .db import engine
 from .pin import hash_pin, verify_pin_async
-from .routers import account_admin, accounts, admin, auth, daraja, public, sales, transactions, withdrawals
+from .routers import account_admin, accounts, admin, auth, daraja, public, sales, tours, transactions, withdrawals
 from .scheduler import build_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +47,7 @@ app.include_router(accounts.router)
 app.include_router(account_admin.router)
 app.include_router(sales.public_router)
 app.include_router(sales.router)
+app.include_router(tours.router)
 
 
 @app.get("/")
