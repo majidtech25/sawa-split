@@ -13,10 +13,22 @@ A successful STK callback has to clear three checks before anything is credited:
                  stays verifying, flagged to the coordinator, who can check again.
      Production must use enforce. flag exists for the sandbox, whose query is
      unreliable, and for the demo.
+
+"Still being processed" (ResultCode 4999, or a message saying so) is never a verdict,
+in either mode: it's asked again later.
+
+A payment with no final result (migration 0019): an M-Pesa sale still 'initiated' (no
+callback came) or 'verifying' (enforce: Safaricom hasn't confirmed) 10 minutes after it
+started is marked 'unresolved'. Its open sale is released so the maker can carry on,
+the coordinator sees it under Payment checks, and Safaricom is asked again every 15
+minutes for 48 hours (after that, only the coordinator's "Check again"). A later "paid"
+credits it as normal ('paid_late', still shown, since the tourist may have paid that
+sale again); a later "not paid" closes it as failed ('failed_late').
 """
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, Callable
 
@@ -38,17 +50,29 @@ FIRST_CHECK_SECONDS = 15
 # check is 'unanswered' (about 19 minutes in all).
 RETRY_DELAYS = [30, 60, 120, 300, 600]
 
+UNRESOLVED_AFTER_MINUTES = 10
+UNRESOLVED_RECHECK_SECONDS = 15 * 60
+UNRESOLVED_QUERY_HOURS = 48
+# Safaricom's "the payment hasn't finished yet", which isn't a "no".
+STILL_PROCESSING_CODES = {"4999"}
+
 Query = Callable[[str], Awaitable[dict[str, Any]]]
 
 
 def classify(answer: dict[str, Any]) -> tuple[str, str]:
     """Reads an STK Push Query answer as ('paid' | 'not_paid' | 'unknown', description).
-    'not_paid' is Safaricom definitely saying no: a non-zero ResultCode (cancelled,
+    'not_paid' is Safaricom definitely saying no: a final non-zero ResultCode (cancelled,
     timed out, insufficient funds...) or no such transaction. Anything else, including
-    "still being processed" and network errors, is 'unknown' and retried."""
+    "still being processed" (4999) and network errors, is 'unknown' and asked again."""
     if "ResultCode" in answer:
         code = str(answer["ResultCode"])
-        return ("paid" if code == "0" else "not_paid"), f"{code}: {answer.get('ResultDesc', '')}".strip()
+        result = str(answer.get("ResultDesc", ""))
+        description = f"{code}: {result}".strip()
+        if code == "0":
+            return "paid", description
+        if code in STILL_PROCESSING_CODES or "processing" in result.lower():
+            return "unknown", description
+        return "not_paid", description
     message = str(answer.get("errorMessage") or answer.get("errorCode") or "no answer")
     if "does not exist" in message.lower():
         return "not_paid", message
@@ -68,6 +92,7 @@ async def _credit(session: AsyncSession, transaction_id, from_status: str) -> bo
         await session.commit()
         return False
     await sales.payment_finished(session, updated.id, paid=True)
+    await sales.paid_late(session, updated.id)  # a sale released while this payment was unresolved
     await write_ledger_entries(
         session,
         transaction_id=updated.id,
@@ -183,7 +208,7 @@ async def check_payment(session: AsyncSession, transaction_id, *, query: Query |
         await session.execute(
             text(
                 """
-                select v.*, t.status as txn_status, s.checkout_request_id
+                select v.*, t.status as txn_status, t.created_at as txn_created_at, s.checkout_request_id
                 from stk_verifications v
                 join transactions t on t.id = v.transaction_id
                 join transaction_secrets s on s.transaction_id = v.transaction_id
@@ -197,9 +222,13 @@ async def check_payment(session: AsyncSession, transaction_id, *, query: Query |
     if row is None:
         await session.rollback()
         return "busy"
-    if row.state in ("verified", "amount_mismatch") or (row.state != "pending" and not force):
+    if row.state in ("verified", "amount_mismatch", "paid_late", "failed_late") or (
+        row.state not in ("pending", "unresolved") and not force
+    ):
         await session.rollback()
         return row.state
+    if row.state == "unresolved":
+        return await _check_unresolved(session, row, query)
 
     try:
         answer = await query(row.checkout_request_id)
@@ -244,14 +273,104 @@ async def check_payment(session: AsyncSession, transaction_id, *, query: Query |
     return state
 
 
+async def _check_unresolved(session: AsyncSession, row, query: Query) -> str:
+    """One query for a payment with no final result (row locked by check_payment).
+    Paid: credited as normal, 'paid_late'. Not paid: closed as failed, 'failed_late'.
+    Unknown: asked again in 15 minutes, until 48 hours after the sale. Commits."""
+    if row.txn_status not in ("initiated", "verifying"):
+        # A late callback already settled it: record which way, without asking again.
+        state = "failed_late" if row.txn_status == "failed" else "paid_late"
+        await session.execute(
+            text("update stk_verifications set state = :state, updated_at = now() where transaction_id = :id"),
+            {"state": state, "id": row.transaction_id},
+        )
+        await session.commit()
+        return state
+    try:
+        answer = await query(row.checkout_request_id)
+    except Exception as exc:  # network trouble is "no answer yet", never a verdict
+        answer = {"errorMessage": f"no answer: {exc}"}
+    outcome, description = classify(answer)
+    log.info("STK Push Query for unresolved %s: %s (%s)", row.transaction_id, outcome, description)
+    state = {"paid": "paid_late", "not_paid": "failed_late"}.get(outcome, "unresolved")
+    if state == "unresolved":
+        give_up = row.txn_created_at + timedelta(hours=UNRESOLVED_QUERY_HOURS) <= datetime.now(timezone.utc)
+        next_check = "infinity" if give_up else (datetime.now(timezone.utc) + timedelta(seconds=UNRESOLVED_RECHECK_SECONDS)).isoformat()
+    else:
+        next_check = datetime.now(timezone.utc).isoformat()
+    await session.execute(
+        text(
+            """
+            update stk_verifications
+            set state = :state, attempts = attempts + 1, last_result = cast(:result as jsonb),
+                next_check_at = cast(:next as timestamptz), updated_at = now()
+            where transaction_id = :id
+            """
+        ),
+        {"state": state, "next": next_check, "id": row.transaction_id,
+         "result": json.dumps({"outcome": outcome, "description": description, "answer": answer}, default=str)},
+    )
+    if state == "failed_late":
+        await session.execute(
+            text("update transactions set status = 'failed' where id = :id and status in ('initiated', 'verifying')"),
+            {"id": row.transaction_id},
+        )
+        await sales.payment_finished(session, row.transaction_id, paid=False)  # no-op once released
+    await session.commit()
+    if state == "paid_late":
+        await _credit(session, row.transaction_id, row.txn_status)  # split, ledger, and the sale paid
+    return state
+
+
+async def mark_unresolved() -> int:
+    """Scheduler job: M-Pesa payments with no final result 10 minutes after they started
+    become 'unresolved', and their held open sales are released. Returns how many."""
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                text(
+                    f"""
+                    select t.id, t.status
+                    from transactions t
+                    left join stk_verifications v on v.transaction_id = t.id
+                    where t.payment_method = 'mpesa'
+                      and t.created_at <= now() - interval '{UNRESOLVED_AFTER_MINUTES} minutes'
+                      and ((t.status = 'initiated' and v.transaction_id is null)
+                           or (t.status = 'verifying' and v.state in ('pending', 'unanswered')))
+                    order by t.created_at
+                    limit 50
+                    """
+                )
+            )
+        ).all()
+        for r in rows:
+            await session.execute(
+                text(
+                    """
+                    insert into stk_verifications (transaction_id, mode, state, next_check_at)
+                    values (:id, :mode, 'unresolved', now())
+                    on conflict (transaction_id) do update
+                      set state = 'unresolved', next_check_at = now(), updated_at = now()
+                      where stk_verifications.state in ('pending', 'unanswered')
+                    """
+                ),
+                {"id": r.id, "mode": settings.stk_query_mode},
+            )
+            await sales.payment_finished(session, r.id, paid=False)  # the maker can carry on
+            log.warning("M-Pesa payment %s (%s) has no final result after %s minutes: unresolved, sale released",
+                        r.id, r.status, UNRESOLVED_AFTER_MINUTES)
+        await session.commit()
+        return len(rows)
+
+
 async def run_due_checks() -> int:
-    """Scheduler job: checks every pending verification that's due."""
+    """Scheduler job: checks every pending or unresolved verification that's due."""
     async with async_session() as session:
         due = (
             await session.execute(
                 text(
-                    "select transaction_id from stk_verifications where state = 'pending' and next_check_at <= now() "
-                    "order by next_check_at limit 20"
+                    "select transaction_id from stk_verifications where state in ('pending', 'unresolved') "
+                    "and next_check_at <= now() order by next_check_at limit 20"
                 )
             )
         ).scalars().all()

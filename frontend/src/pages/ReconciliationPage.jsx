@@ -42,10 +42,16 @@ const CHECK_LABEL = {
   mismatch: "Safaricom says not paid",
   unanswered: "Safaricom never answered",
   amount_mismatch: "Callback amount was wrong",
+  unresolved: "No final answer yet",
+  paid_late: "Paid late",
 }
 
 // What each flagged check means for the money, in a coordinator's terms.
 function checkMeaning(c) {
+  if (c.state === "unresolved")
+    return "Nobody is credited. The sale was released after 10 minutes so the maker could carry on. Safaricom is asked again every 15 minutes."
+  if (c.state === "paid_late")
+    return "Safaricom confirmed it after the sale was released, so it was credited then. Check the tourist didn't pay this sale twice."
   if (c.state === "amount_mismatch") return "The callback was refused and nobody was credited."
   if (c.transaction_status === "verifying") return "Nobody is credited until Safaricom confirms it."
   if (c.state === "mismatch" && c.transaction_status === "failed") return "Marked failed. Nobody was credited."
@@ -72,7 +78,7 @@ function PaymentChecks({ checks, reload }) {
     <section className="mt-8">
       <h2 className="text-lg font-semibold">Payment checks</h2>
       <p className="mt-1 text-sm text-sawa-text-muted">
-        Every M-Pesa callback is confirmed with Safaricom (STK Push Query). These ones need a look.
+        Every M-Pesa payment is confirmed with Safaricom (STK Push Query). These ones need a look.
       </p>
       <div className="mt-2">
         <ErrorNote>{error}</ErrorNote>
@@ -106,7 +112,7 @@ function PaymentChecks({ checks, reload }) {
                 </Td>
                 <Td className="text-sawa-text-muted">{checkMeaning(c)}</Td>
                 <Td right>
-                  {c.state !== "amount_mismatch" && c.transaction_status !== "failed" && (
+                  {!["amount_mismatch", "paid_late"].includes(c.state) && c.transaction_status !== "failed" && (
                     <button
                       type="button"
                       onClick={() => checkAgain(c.transaction_id)}

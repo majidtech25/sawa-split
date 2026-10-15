@@ -115,6 +115,22 @@ async def payment_finished(session: AsyncSession, transaction_id, *, paid: bool)
     )
 
 
+async def paid_late(session: AsyncSession, transaction_id) -> None:
+    """A payment Safaricom confirmed only after its sale was released (app/verification.py):
+    the sale is paid, unless another payment has paid or is paying it, or the maker
+    cancelled it. Doesn't commit."""
+    await session.execute(
+        text(
+            """
+            update open_sales s set status = 'paid', paid_at = now()
+            from transactions t
+            where t.id = :tid and t.open_sale_id = s.id and s.status in ('open', 'expired')
+            """
+        ),
+        {"tid": transaction_id},
+    )
+
+
 def new_expiry() -> datetime:
     return datetime.now(timezone.utc) + timedelta(minutes=SALE_MINUTES)
 

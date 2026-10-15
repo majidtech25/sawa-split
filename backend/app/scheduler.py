@@ -33,6 +33,11 @@ def build_scheduler() -> AsyncIOScheduler:
         verification.run_due_checks, IntervalTrigger(seconds=20),
         id="stk_push_query", coalesce=True, max_instances=1,
     )
+    # A payment with no final result after 10 minutes: release its sale, keep asking.
+    scheduler.add_job(
+        verification.mark_unresolved, IntervalTrigger(minutes=1),
+        id="mark_unresolved_payments", coalesce=True, max_instances=1,
+    )
     # SCOPE_V2: open sales nobody paid within 30 minutes expire.
     scheduler.add_job(
         sales.expire_open_sales, IntervalTrigger(minutes=1),

@@ -70,7 +70,8 @@ class PaymentCheck(BaseModel):
     producer_name: str
     total_amount: Decimal
     transaction_status: str     # 'confirmed' (credited, flag mode), 'verifying' (enforce), 'initiated', 'failed'
-    state: str                  # pending (enforce only), mismatch, unanswered, amount_mismatch
+    state: str                  # pending (enforce only), mismatch, unanswered, amount_mismatch,
+                                # unresolved (no final result; sale released), paid_late (credited late)
     mode: str
     attempts: int
     callback_amount: Decimal | None
@@ -140,7 +141,7 @@ async def reconciliation(
                   (select count(*) from transactions where status = 'cash_expired')
                     + (select count(*) from withdrawal_requests where status = 'failed')
                     + (select count(*) from stk_verifications
-                         where state in ('mismatch', 'unanswered', 'amount_mismatch')) as needs_attention
+                         where state in ('mismatch', 'unanswered', 'amount_mismatch', 'unresolved')) as needs_attention
                 """
             )
         )
@@ -158,7 +159,9 @@ async def reconciliation(
     )
 
     # STK Push Query checks a coordinator should see: anything Safaricom contradicted,
-    # never answered, or a callback with the wrong amount, plus sales still verifying.
+    # never answered, or a callback with the wrong amount, plus sales still verifying,
+    # payments with no final result, and payments confirmed only after their sale was
+    # released (the tourist may have paid that sale twice).
     checks = (
         await session.execute(
             text(
@@ -167,7 +170,8 @@ async def reconciliation(
                 from stk_verifications v
                 join transactions t on t.id = v.transaction_id
                 join producers p on p.id = t.producer_id
-                where v.state in ('mismatch', 'unanswered', 'amount_mismatch') or t.status = 'verifying'
+                where v.state in ('mismatch', 'unanswered', 'amount_mismatch', 'unresolved', 'paid_late')
+                   or t.status = 'verifying'
                 order by t.created_at desc
                 limit 200
                 """
