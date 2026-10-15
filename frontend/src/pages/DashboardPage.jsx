@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react"
 import { Check, Wallet } from "lucide-react"
 import NewSale from "../components/NewSale"
 import ReferralCard from "../components/ReferralCard"
+import TourCard from "../components/TourCard"
 import { ErrorNote, LiveIndicator, Screen, SecondaryButton, StatusBadge, TextArea } from "../components/ui"
 import { api } from "../lib/api"
-import { eatDate, eatDateTime, ksh, wasCredited } from "../lib/format"
+import { eatDate, eatDateTime, ksh, referrerType, wasCredited } from "../lib/format"
 import { useLiveChanges } from "../lib/realtime"
 import { currentProfile, supabase } from "../lib/supabase"
 
@@ -26,7 +27,7 @@ async function loadDashboard(profile) {
     supabase
       .from("transactions")
       .select(
-        "id, created_at, status, payment_method, total_amount, maker_amount, driver_amount, driver_id, maker_confirmed_at, driver_confirmed_at, confirmation_deadline",
+        "id, created_at, status, payment_method, total_amount, maker_amount, driver_amount, driver_id, open_sale_id, maker_confirmed_at, driver_confirmed_at, confirmation_deadline",
       )
       .order("created_at", { ascending: false })
       .limit(20),
@@ -53,6 +54,12 @@ async function loadDashboard(profile) {
     referralCode: account.referral_code,
     stallCode: account.stall_code,
     photoFee: account.photo_fee ? Number(account.photo_fee) : null,
+    service: account.business_type === "service",
+    referrerType: account.referrer_type,
+    todaySales: account.today_sales,
+    todayTotal: Number(account.today_total),
+    waitingConfirmation: Number(account.waiting_confirmation),
+    owedToMe: Number(account.owed_to_me),
     closure: account.closure,
     pending: sum("pending"),
     frozen: sum("frozen"),
@@ -67,6 +74,26 @@ function needsMyConfirmation(row, role) {
   if (row.confirmation_deadline && new Date(row.confirmation_deadline) <= new Date()) return false
   if (role === "producer") return !row.maker_confirmed_at
   return row.driver_id && !row.driver_confirmed_at
+}
+
+// What a cash sale still waits for, from this user's side (MUST 18e).
+function nextStep(row, role) {
+  if (row.status !== "cash_unconfirmed") return null
+  if (role === "producer") {
+    if (!row.maker_confirmed_at) return "Waiting for you to confirm"
+    return row.driver_id ? "Waiting for the guide to confirm" : "Waiting for the tourist to confirm"
+  }
+  return row.driver_confirmed_at ? "Waiting for the seller to confirm" : "Waiting for you to confirm"
+}
+
+function SummaryTile({ label, value, note }) {
+  return (
+    <div className="rounded-sawa border border-sawa-border bg-sawa-surface p-3">
+      <div className="text-[13px] text-sawa-text-muted">{label}</div>
+      <div className="mt-0.5 font-mono text-xl font-bold tabular-nums">{value}</div>
+      {note && <div className="text-xs text-sawa-text-muted">{note}</div>}
+    </div>
+  )
 }
 
 function WithdrawPanel({ available, owedToDrivers, withdrawals, onWithdrawn }) {
@@ -93,7 +120,7 @@ function WithdrawPanel({ available, owedToDrivers, withdrawals, onWithdrawn }) {
 
   let label = `Withdraw ${ksh(available)}`
   if (belowThreshold) label = `Withdraw unlocks at ${ksh(WITHDRAW_THRESHOLD)} (you have ${ksh(available)})`
-  if (belowThreshold && owedToDrivers > 0) label = `Withdraw unlocks once drivers are paid`
+  if (belowThreshold && owedToDrivers > 0) label = `Withdraw unlocks once guides are paid`
   if (inFlight) label = `Paying out ${ksh(latest.amount)}…`
   if (busy) label = "Starting your payout…"
 
@@ -268,30 +295,49 @@ export default function DashboardPage() {
   }
 
   const shareOf = (row) => (isMaker ? row.maker_amount : row.driver_amount)
-  const referrals = data.transactions.filter((t) => ["confirmed", "cash_confirmed"].includes(t.status)).length
 
   return (
     <Screen className="flex flex-col gap-6">
       <div className="flex items-baseline justify-between gap-2">
         <div>
           <h1 className="text-lg font-semibold">{data.name}</h1>
-          <p className="text-[13px] text-sawa-text-muted">{isMaker ? data.site || "Maker" : "Driver"}</p>
+          <p className="text-[13px] text-sawa-text-muted">{isMaker ? data.site || "Maker" : referrerType(data.referrerType)}</p>
         </div>
         <LiveIndicator live={live} />
       </div>
 
-      <section aria-label="Balance" className="flex flex-col gap-1">
-        {!isMaker && (
+      {/* The summary at the top (MUST 18b, 18c). */}
+      {isMaker ? (
+        <section aria-label="Summary" className="grid grid-cols-2 gap-2">
+          <SummaryTile label="Today's sales" value={ksh(data.todayTotal)} note={`${data.todaySales} ${data.todaySales === 1 ? "sale" : "sales"}`} />
+          <SummaryTile label="Cash in hand" value={ksh(data.cashHeld)} note="From cash sales" />
+          <SummaryTile label="Owed to guides" value={ksh(data.owedToDrivers)} note="Paid from your M-Pesa first" />
+          <SummaryTile label="Available to withdraw" value={ksh(data.payable)} />
+        </section>
+      ) : (
+        <section aria-label="Summary" className="flex flex-col gap-1">
           <p className="text-[15px]">
-            <span className="font-mono text-2xl font-bold tabular-nums">{referrals}</span>{" "}
-            <span className="text-sawa-text-muted">confirmed {referrals === 1 ? "referral" : "referrals"} (recent)</span>
+            Today: <span className="font-mono font-semibold tabular-nums">{data.todaySales}</span>{" "}
+            {data.todaySales === 1 ? "referral" : "referrals"} ·{" "}
+            <span className="font-mono tabular-nums">{ksh(data.waitingConfirmation)}</span> waiting for confirmation
           </p>
-        )}
-        <p className="text-[13px] text-sawa-text-muted">Available balance</p>
-        <p className="font-mono text-[40px] font-bold leading-tight tabular-nums">{ksh(data.payable)}</p>
+          <p className="text-[13px] text-sawa-text-muted">Owed to you</p>
+          <p className="font-mono text-[40px] font-bold leading-tight tabular-nums">{ksh(data.owedToMe)}</p>
+          <p className="text-[13px] text-sawa-text-muted">
+            Available to withdraw now: <span className="font-mono text-sawa-text">{ksh(data.payable)}</span>
+          </p>
+        </section>
+      )}
+
+      {isMaker && data.stallCode && data.accountStatus === "active" && (
+        <NewSale stallCode={data.stallCode} photoFee={data.photoFee} service={data.service} onChange={load} />
+      )}
+      {!isMaker && data.accountStatus === "active" && <TourCard onChange={load} />}
+
+      <section aria-label="Balance details" className="flex flex-col gap-1">
         {data.owedToDrivers > 0 && (
           <p className="text-[13px] text-sawa-text-muted">
-            You owe drivers <span className="font-mono text-sawa-text">{ksh(data.owedToDrivers)}</span> from cash sales. It's
+            You owe guides <span className="font-mono text-sawa-text">{ksh(data.owedToDrivers)}</span> from cash sales. It's
             paid from your M-Pesa earnings first
             {data.available > 0 && <> (you have <span className="font-mono">{ksh(data.available)}</span> toward it)</>}.
           </p>
@@ -303,10 +349,7 @@ export default function DashboardPage() {
           </p>
         )}
         {data.cashHeld > 0 && (
-          <p className="text-[13px] text-sawa-text-muted">
-            Cash sales already in your hands: <span className="font-mono">{ksh(data.cashHeld)}</span>. Cash is never paid out
-            again by M-Pesa.
-          </p>
+          <p className="text-[13px] text-sawa-text-muted">Cash is already in your hands, so it's never paid out again by M-Pesa.</p>
         )}
         {(data.pending > 0 || data.frozen > 0) && (
           <p className="text-[13px] text-sawa-text-muted">
@@ -317,9 +360,6 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {isMaker && data.stallCode && data.accountStatus === "active" && (
-        <NewSale stallCode={data.stallCode} photoFee={data.photoFee} onChange={load} />
-      )}
       {!isMaker && data.referralCode && <ReferralCard code={data.referralCode} />}
 
       <WithdrawPanel available={data.payable} owedToDrivers={data.owedToDrivers} withdrawals={data.withdrawals} onWithdrawn={load} />
@@ -337,6 +377,7 @@ export default function DashboardPage() {
                 <div className="min-w-0">
                   <div className="font-mono text-[13px] tabular-nums text-sawa-text-muted">{eatDateTime(row.created_at)}</div>
                   <StatusBadge status={row.status} />
+                  {nextStep(row, profile.role) && <div className="text-[13px] text-sawa-text-muted">{nextStep(row, profile.role)}</div>}
                 </div>
                 <div className="text-right">
                   {wasCredited(row.status) ? (
@@ -347,10 +388,16 @@ export default function DashboardPage() {
                   <div className="text-xs text-sawa-text-muted">of {ksh(row.total_amount)}</div>
                 </div>
               </div>
-              {needsMyConfirmation(row, profile.role) && (
+              {/* A maker confirms an open sale's cash in its sale card above (MUST 18b); everything else here.
+                  Each button shows the person's own share (MUST 13, 18c). */}
+              {needsMyConfirmation(row, profile.role) && !(isMaker && row.open_sale_id) && (
                 <SecondaryButton className="w-full" onClick={() => confirm(row)} disabled={confirming === row.id}>
                   <Check aria-hidden="true" className="size-4 shrink-0" />
-                  {confirming === row.id ? "Confirming…" : `Confirm ${ksh(row.total_amount)} cash received`}
+                  {confirming === row.id
+                    ? "Confirming…"
+                    : isMaker
+                      ? `Cash received? Confirm sale. Your share: ${ksh(row.maker_amount)}`
+                      : `Confirm this sale. You earn ${ksh(row.driver_amount)}`}
                 </SecondaryButton>
               )}
             </li>
