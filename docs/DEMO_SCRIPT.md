@@ -25,6 +25,7 @@ Rehearse this as a duet, not a solo with an assistant — the driver's judgment 
   - The price-transparency card shows the two locked components separately: Product KSh 100 (maker KSh 70, driver referral KSh 30), Photo consent KSh 10 (maker only), Total KSh 110. These are the demo producer's real configured split (30% driver), so the card shows exactly what the STK Push charges and the ledger records.
 - **Tab 2:** coordinator reconciliation/dashboard view, already logged in, ledger table visible without scrolling.
 - **v2 flow props (SCOPE_V2):** James's referral QR (his dashboard → "Show full screen", or the printed QR-DRIVER-001 card, which still works) and Wanjiru's printed stand QR (her dashboard → "Print my stand QR", opens `#/stand/WANJIRU`). Wanjiru's dashboard open on a second device for "New sale".
+- **Start the tour before every demo (v2 flow).** Since tours (SCOPE_V2 MUST 17), a guide code earns a referral only for a tourist who joined that guide's running tour. Log in as James (and Hassan, if he's in the demo) → dashboard → **Start tour**, group size = how many tourist phones the demo uses (1–30). A tour ends at midnight EAT, so start it again on each demo day. Without one, the checkout says "James isn't running a tour right now" and the sale pays the maker 100%. If the demo is re-run, tap **End tour** and start a fresh one so joins from the last run don't fill it. The v1 signed card (Tab 1) doesn't need a tour: its driver is part of the signed card.
 - **Tab 3 (hidden until needed):** the backup screen recording, cued to 0:00, paused, audio level checked.
 - Presenter's own Safaricom phone: charged, on vibrate (the buzz is part of the moment — don't mute it), M-Pesa PIN known cold. Confirm in a dry run *before* the event that this exact number is registered and receiving Daraja sandbox STK prompts reliably.
 - Confirm venue connectivity in advance, not day-of. Bring a personal hotspot as the primary connection and venue WiFi as the fallback (or the reverse, whichever tested more reliably) — both tested ahead of time, not assumed.
@@ -44,12 +45,13 @@ Keyed to the pitch script's own stage directions in Section 3.
 
 ## 3a. v2 sequence: tour pass → stall QR → pay
 
-1. Tourist phone scans James's referral QR → "James — registered Sawa Split driver" → tap **Use James as my guide today** (saved on the phone until midnight EAT).
-2. Wanjiru's dashboard → **New sale**: agreed amount (whole KSh), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for payment*.
-3. Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → the sale appears with **Guide code JAMES** already filled in and "Guide: James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly.
-4. Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash (James and Wanjiru each confirm on their dashboards). Wanjiru's status moves to *Payment in progress*, then *Paid*.
-5. Coordinator Tab 2: the sale, the split, and Referrers (JAMES: sales count and commission) update.
-6. Paying the same sale again, or an expired or cancelled one, is refused with a plain message.
+0. **James's dashboard → Start tour** (see section 2), done before judges sit down. The card shows "0 of N joined".
+1. Tourist phone scans James's referral QR → "James · Driver · Active" → tap **Use James as my guide today**. The join is counted on the server (James's card: "1 of N joined") and the phone keeps it until midnight EAT.
+2. Wanjiru's dashboard → **New sale**: agreed amount (whole KSh, numeric keypad), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for the tourist to pay*.
+3. Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes**. The sale appears with **Guide code JAMES** filled in and "Guide · James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly. ("No, I'm done" removes James and clears the tour pass: Wanjiru gets 100%.)
+4. Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash. For cash, the tourist sees *Waiting for the seller and guide to confirm*. Wanjiru confirms in her sale card ("Cash received? Confirm sale. Your share: KSh X"), and James confirms on his dashboard ("Confirm this sale. You earn KSh Y"). Only then does the tourist's receipt say *Cash payment confirmed*.
+5. Coordinator Tab 2: the sale and the split, plus Referrers (JAMES, Driver: sales and commission) and Tours (James: group size, joined, sales, commission) update.
+6. Paying the same sale again, or an expired or cancelled one, is refused with a plain message. A full tour refuses another join ("James's tour is full"), and that tourist pays with no referral.
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 
