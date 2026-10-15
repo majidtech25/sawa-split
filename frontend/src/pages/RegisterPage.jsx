@@ -35,7 +35,33 @@ function Checkbox({ id, checked, onChange, children }) {
   )
 }
 
-const EMPTY = { name: "", phone: "", till: "", pin: "", site: "", split: "30", product: true, photo: false, photoFee: "" }
+// A choice of a few, as one row of buttons (SCOPE_V2 MUST 15).
+function Choice({ legend, value, options, onChange, hint }) {
+  return (
+    <fieldset className="flex flex-col gap-1.5">
+      <legend className="text-[13px] text-sawa-text-muted">{legend}</legend>
+      <div className="mt-1.5 flex overflow-hidden rounded-sawa border border-sawa-border bg-sawa-surface">
+        {options.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={value === key}
+            onClick={() => onChange(key)}
+            className={`flex-1 px-2 py-2 text-sm font-semibold ${focusRing} ${value === key ? "bg-sawa-green text-white" : "text-sawa-text-muted hover:text-sawa-text"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {hint && <p className="text-xs text-sawa-text-muted">{hint}</p>}
+    </fieldset>
+  )
+}
+
+const EMPTY = {
+  name: "", phone: "", till: "", pin: "", site: "", split: "30", product: true, photo: false, photoFee: "",
+  businessType: "product", referrerType: "driver",
+}
 
 export default function RegisterPage() {
   const [role, setRole] = useState("producer")
@@ -58,6 +84,8 @@ export default function RegisterPage() {
       if (form.split === "" || Number.isNaN(split) || split < 0 || split > 40)
         e.split = "Between 0 and 40. The maker always keeps at least 60% of the product price."
       if (!form.product && !form.photo) e.charges = "Pick at least one: product, photo consent, or both."
+      if (form.businessType === "service" && (form.photo || form.photoFee !== ""))
+        e.photoFee = "A service includes photography in its price: no photo consent or photo fee."
       if (form.photoFee !== "" && !/^[1-9]\d*$/.test(form.photoFee)) e.photoFee = "Whole shillings only, like 10."
       if (form.photoFee !== "" && !form.photo) e.photoFee = "Tick photo consent above to charge a photo fee."
     }
@@ -80,8 +108,9 @@ export default function RegisterPage() {
             charges_product: form.product,
             charges_photo: form.photo,
             photo_fee: form.photoFee === "" ? null : Number(form.photoFee),
+            business_type: form.businessType,
           }
-        : { ...base, qr_code: qrCode }
+        : { ...base, qr_code: qrCode, referrer_type: form.referrerType }
     try {
       const created = await api("/auth/onboard", { method: "POST", auth: true, body })
       let qrImage = null
@@ -131,7 +160,7 @@ export default function RegisterPage() {
 
       <div role="tablist" aria-label="Who are you registering" className="mt-5 flex overflow-hidden rounded-sawa border border-sawa-border bg-sawa-surface">
         {tab("producer", "New maker")}
-        {tab("driver", "New driver")}
+        {tab("driver", "New guide")}
       </div>
 
       {done && (
@@ -183,9 +212,20 @@ export default function RegisterPage() {
         {role === "producer" ? (
           <>
             <Field id="reg-site" label="Site (optional)" placeholder="e.g. Talek gate" value={form.site} onChange={(e) => set("site")(e.target.value)} />
+            <Choice
+              legend="Sells"
+              value={form.businessType}
+              options={[["product", "Products"], ["service", "A service"]]}
+              onChange={(v) => setForm((f) => ({ ...f, businessType: v, ...(v === "service" ? { photo: false, photoFee: "" } : {}) }))}
+              hint={
+                form.businessType === "service"
+                  ? "Photography is included free in the price: no photo line, and the whole price is split as usual."
+                  : "Photo consent can be added to a sale as its own line, paid to the maker in full."
+              }
+            />
             <Field
               id="reg-split"
-              label="Driver referral (% of the product price)"
+              label="Guide referral (% of the price)"
               inputMode="numeric"
               value={form.split}
               onChange={(e) => set("split")(e.target.value.replace(/[^\d.]/g, ""))}
@@ -197,38 +237,51 @@ export default function RegisterPage() {
               <Checkbox id="reg-product" checked={form.product} onChange={set("product")}>
                 Product or service
               </Checkbox>
-              <Checkbox id="reg-photo" checked={form.photo} onChange={set("photo")}>
-                Photo consent
-              </Checkbox>
+              {form.businessType === "product" && (
+                <Checkbox id="reg-photo" checked={form.photo} onChange={set("photo")}>
+                  Photo consent
+                </Checkbox>
+              )}
               <p className={`text-xs ${errors.charges ? "text-sawa-terracotta" : "text-sawa-text-muted"}`}>
                 {errors.charges || "Each is priced separately. Switch on one or both."}
               </p>
             </fieldset>
-            <Field
-              id="reg-photo-fee"
-              label="Photo fee (KSh, whole, optional)"
-              inputMode="numeric"
-              value={form.photoFee}
-              onChange={(e) => set("photoFee")(e.target.value.trim())}
-              error={errors.photoFee}
-              hint="Offered on the maker's own sales as a separate photo-consent line, paid to them in full."
-            />
+            {form.businessType === "product" && (
+              <Field
+                id="reg-photo-fee"
+                label="Photo fee (KSh, whole, optional)"
+                inputMode="numeric"
+                value={form.photoFee}
+                onChange={(e) => set("photoFee")(e.target.value.trim())}
+                error={errors.photoFee}
+                hint="Offered on the maker's own sales as a separate photo-consent line, paid to them in full."
+              />
+            )}
           </>
         ) : (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[13px] text-sawa-text-muted">QR code</span>
-            <div className="flex items-center justify-between gap-3 rounded-sawa border border-sawa-border bg-sawa-surface px-3 py-2.5">
-              <span className="font-mono text-[15px]">{qrCode}</span>
-              <button type="button" onClick={() => setQrCode(newQrCode())} className={`text-sm text-sawa-green underline ${focusRing}`}>
-                New code
-              </button>
+          <>
+            <Choice
+              legend="Type"
+              value={form.referrerType}
+              options={[["driver", "Driver"], ["tour_guide", "Tour guide"], ["agent", "Agent"]]}
+              onChange={set("referrerType")}
+              hint="Shown on their QR page, their dashboard and Reconciliation."
+            />
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[13px] text-sawa-text-muted">QR code</span>
+              <div className="flex items-center justify-between gap-3 rounded-sawa border border-sawa-border bg-sawa-surface px-3 py-2.5">
+                <span className="font-mono text-[15px]">{qrCode}</span>
+                <button type="button" onClick={() => setQrCode(newQrCode())} className={`text-sm text-sawa-green underline ${focusRing}`}>
+                  New code
+                </button>
+              </div>
+              <p className="text-xs text-sawa-text-muted">Printed on their QR card; it identifies them as the referring guide.</p>
             </div>
-            <p className="text-xs text-sawa-text-muted">Printed on their QR card; it identifies them as the referring driver.</p>
-          </div>
+          </>
         )}
 
         <SecondaryButton type="submit" disabled={busy} className="mt-2 w-full">
-          {busy ? "Registering…" : role === "producer" ? "Register maker" : "Register driver"}
+          {busy ? "Registering…" : role === "producer" ? "Register maker" : "Register guide"}
         </SecondaryButton>
         <ErrorNote>{submitError}</ErrorNote>
       </form>

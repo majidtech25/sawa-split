@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { AlertTriangle, Check } from "lucide-react"
 import { ErrorNote, LiveIndicator, StatusBadge } from "../components/ui"
 import { api } from "../lib/api"
-import { eatDateTime, ksh, wasCredited } from "../lib/format"
+import { eatDate, eatDateTime, eatTime, ksh, referrerType, wasCredited } from "../lib/format"
 import { useLiveChanges } from "../lib/realtime"
 
 function Tile({ label, value, note, tone = "text-sawa-text" }) {
@@ -349,6 +349,7 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
                   <thead>
                     <tr>
                       <Th>Referrer</Th>
+                      <Th>Type</Th>
                       <Th>Code</Th>
                       <Th right>Sales</Th>
                       <Th right>Commission</Th>
@@ -358,9 +359,49 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
                     {data.referrers.map((r) => (
                       <tr key={r.referral_code}>
                         <Td>{r.name}</Td>
+                        <Td>{referrerType(r.referrer_type)}</Td>
                         <Td mono>{r.referral_code}</Td>
                         <Td right mono>{r.sales}</Td>
                         <Td right mono>{ksh(r.commission)}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {data.tours?.length > 0 && (
+            <section className="mt-8">
+              <h2 className="text-lg font-semibold">Tours</h2>
+              <p className="mt-1 text-sm text-sawa-text-muted">
+                A referral counts only for a tourist who joined the referrer's running tour, so joins can't pass the group size.
+              </p>
+              <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
+                <table className="w-full min-w-[640px] border-collapse">
+                  <thead>
+                    <tr>
+                      <Th>Referrer</Th>
+                      <Th>Date (EAT)</Th>
+                      <Th right>Group size</Th>
+                      <Th right>Joined</Th>
+                      <Th right>Sales</Th>
+                      <Th right>Commission</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.tours.map((tour) => (
+                      <tr key={tour.id}>
+                        <Td>
+                          {tour.referrer_name} <span className="font-mono text-xs text-sawa-text-muted">{tour.referral_code}</span>
+                        </Td>
+                        <Td mono>
+                          {eatDate(tour.started_at)}, {eatTime(tour.started_at)}–{tour.ended_at ? eatTime(tour.ended_at) : "running"}
+                        </Td>
+                        <Td right mono>{tour.group_size}</Td>
+                        <Td right mono>{tour.joined}</Td>
+                        <Td right mono>{tour.sales}</Td>
+                        <Td right mono>{ksh(tour.commission)}</Td>
                       </tr>
                     ))}
                   </tbody>
