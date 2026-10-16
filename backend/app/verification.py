@@ -53,8 +53,9 @@ RETRY_DELAYS = [30, 60, 120, 300, 600]
 UNRESOLVED_AFTER_MINUTES = 10
 UNRESOLVED_RECHECK_SECONDS = 15 * 60
 UNRESOLVED_QUERY_HOURS = 48
-# Safaricom's "the payment hasn't finished yet", which isn't a "no".
+# Safaricom's "the payment hasn't finished yet", which isn't a "no": the code, or wording.
 STILL_PROCESSING_CODES = {"4999"}
+STILL_PROCESSING_WORDS = ("being processed", "processing", "in progress")
 
 Query = Callable[[str], Awaitable[dict[str, Any]]]
 
@@ -70,7 +71,7 @@ def classify(answer: dict[str, Any]) -> tuple[str, str]:
         description = f"{code}: {result}".strip()
         if code == "0":
             return "paid", description
-        if code in STILL_PROCESSING_CODES or "processing" in result.lower():
+        if code in STILL_PROCESSING_CODES or any(w in result.lower() for w in STILL_PROCESSING_WORDS):
             return "unknown", description
         return "not_paid", description
     message = str(answer.get("errorMessage") or answer.get("errorCode") or "no answer")
@@ -293,21 +294,22 @@ async def _check_unresolved(session: AsyncSession, row, query: Query) -> str:
     outcome, description = classify(answer)
     log.info("STK Push Query for unresolved %s: %s (%s)", row.transaction_id, outcome, description)
     state = {"paid": "paid_late", "not_paid": "failed_late"}.get(outcome, "unresolved")
-    if state == "unresolved":
-        give_up = row.txn_created_at + timedelta(hours=UNRESOLVED_QUERY_HOURS) <= datetime.now(timezone.utc)
-        next_check = "infinity" if give_up else (datetime.now(timezone.utc) + timedelta(seconds=UNRESOLVED_RECHECK_SECONDS)).isoformat()
-    else:
-        next_check = datetime.now(timezone.utc).isoformat()
+    # Still unknown: ask again in 15 minutes, or, 48 hours after the sale, only when the
+    # coordinator presses Check again ('infinity': the scheduler never picks it up).
+    give_up = row.txn_created_at + timedelta(hours=UNRESOLVED_QUERY_HOURS) <= datetime.now(timezone.utc)
     await session.execute(
         text(
             """
             update stk_verifications
             set state = :state, attempts = attempts + 1, last_result = cast(:result as jsonb),
-                next_check_at = cast(:next as timestamptz), updated_at = now()
+                next_check_at = case when :give_up then 'infinity'::timestamptz
+                                     else now() + make_interval(secs => :delay) end,
+                updated_at = now()
             where transaction_id = :id
             """
         ),
-        {"state": state, "next": next_check, "id": row.transaction_id,
+        {"state": state, "give_up": give_up and state == "unresolved",
+         "delay": UNRESOLVED_RECHECK_SECONDS if state == "unresolved" else 0, "id": row.transaction_id,
          "result": json.dumps({"outcome": outcome, "description": description, "answer": answer}, default=str)},
     )
     if state == "failed_late":
