@@ -33,25 +33,28 @@ export default function StandPage() {
   if (error) return <main className="mx-auto max-w-[420px] px-4 py-8"><ErrorNote>{error}</ErrorNote></main>
   if (!stall || !qr) return <main className="mx-auto max-w-[420px] px-4 py-8 text-sm text-sawa-text-muted">Loading…</main>
 
+  // The printable stand keeps its original near-white page, not the site's sand background.
   return (
-    <main className="mx-auto flex min-h-screen max-w-[520px] flex-col items-center justify-center gap-5 px-4 py-10 text-center">
-      <Brand className="text-base" />
-      <h1 className="text-3xl font-semibold">{stall.maker.name}</h1>
-      {stall.site && <p className="text-lg text-sawa-text-muted">{stall.site}</p>}
-      <img src={qr} alt={`QR code for ${stall.maker.name}'s stall`} className="w-full max-w-[360px] rounded-sawa border border-sawa-border" />
-      <p className="text-xl font-semibold">Scan to pay</p>
-      <p className="max-w-[360px] text-[15px] text-sawa-text-muted">
-        See exactly where every shilling goes before you pay: to the maker, and to your guide if you have one. Nothing to
-        Sawa Split.
-      </p>
-      <p className="font-mono text-sm text-sawa-text-muted">Stall {stall.stall_code}</p>
-      <button
-        type="button"
-        onClick={() => window.print()}
-        className="rounded-sawa border border-sawa-green px-4 py-2.5 text-sm font-semibold text-sawa-green hover:bg-sawa-green hover:text-white print:hidden"
-      >
-        Print this stand
-      </button>
-    </main>
+    <div className="min-h-screen bg-[#fafaf8]">
+      <main className="mx-auto flex min-h-screen max-w-[520px] flex-col items-center justify-center gap-5 px-4 py-10 text-center">
+        <Brand className="text-base" />
+        <h1 className="text-3xl font-semibold">{stall.maker.name}</h1>
+        {stall.site && <p className="text-lg text-sawa-text-muted">{stall.site}</p>}
+        <img src={qr} alt={`QR code for ${stall.maker.name}'s stall`} className="w-full max-w-[360px] rounded-sawa border border-sawa-border" />
+        <p className="text-xl font-semibold">Scan to pay</p>
+        <p className="max-w-[360px] text-[15px] text-sawa-text-muted">
+          See exactly where every shilling goes before you pay: to the maker, and to your guide if you have one. Nothing to
+          Sawa Split.
+        </p>
+        <p className="font-mono text-sm text-sawa-text-muted">Stall {stall.stall_code}</p>
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="rounded-sawa border border-sawa-green px-4 py-2.5 text-sm font-semibold text-sawa-green hover:bg-sawa-green hover:text-white print:hidden"
+        >
+          Print this stand
+        </button>
+      </main>
+    </div>
   )
 }

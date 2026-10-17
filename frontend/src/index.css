@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --color-sawa-bg: #fafaf8;
+  --color-sawa-bg: #faf6ee; /* warm sand (2026-10-18; was #fafaf8, kept on the printable stand page) */
   --color-sawa-surface: #ffffff;
   --color-sawa-text: #1a1a1a;
   --color-sawa-text-muted: #6b6b63;

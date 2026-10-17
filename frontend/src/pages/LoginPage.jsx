@@ -1,8 +1,21 @@
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { ErrorNote, Field, Screen, SecondaryButton } from "../components/ui"
+import { Link, useNavigate } from "react-router-dom"
+import { ErrorNote, Field, Screen, SecondaryButton, tapTarget } from "../components/ui"
 import { api } from "../lib/api"
 import { startSession } from "../lib/supabase"
+
+// To the homepage's contact section (it scrolls there, like the demo's "contact us").
+function ContactLink() {
+  return (
+    <Link
+      to="/"
+      state={{ scrollTo: "contact" }}
+      className={`${tapTarget} text-sm font-semibold text-sawa-green underline-offset-2 hover:underline`}
+    >
+      Bring Sawa Split to your market →
+    </Link>
+  )
+}
 
 // One login for producers, drivers and the coordinator (phone + 4-digit PIN);
 // what loads afterwards depends on who signed in.
@@ -11,11 +24,13 @@ export default function LoginPage() {
   const [phone, setPhone] = useState("")
   const [pin, setPin] = useState("")
   const [error, setError] = useState(null)
+  const [rejected, setRejected] = useState(false) // the API said no: offer the way to get registered
   const [busy, setBusy] = useState(false)
 
   async function submit(event) {
     event.preventDefault()
     setError(null)
+    setRejected(false)
     if (!/^\d{4}$/.test(pin)) {
       setError("Your PIN is the 4 digits your coordinator gave you.")
       return
@@ -27,7 +42,10 @@ export default function LoginPage() {
       const profile = await startSession(login)
       navigate(profile.role === "coordinator" ? "/coordinator" : "/dashboard", { replace: true })
     } catch (err) {
+      // One message for a wrong PIN and an unknown number alike: the API answers both with
+      // the same 401, so nobody can learn which phone numbers are registered.
       setError(err.status === 401 ? "That phone number and PIN don't match. Check both and try again." : err.message)
+      setRejected(err.status === 401)
       setBusy(false)
     }
   }
@@ -63,10 +81,18 @@ export default function LoginPage() {
           {busy ? "Logging in…" : "Log in"}
         </SecondaryButton>
         <ErrorNote>{error}</ErrorNote>
+        {rejected && (
+          <div className="-mt-2">
+            <ContactLink />
+          </div>
+        )}
       </form>
-      <p className="mt-8 text-center text-[13px] text-sawa-text-muted">
-        Makers and drivers are registered by your site coordinator. Ask them for your login.
-      </p>
+      <div className="mt-8 border-t border-sawa-border pt-5 text-center">
+        <p className="text-[13px] text-sawa-text-muted">
+          Not registered yet? Makers, guides and drivers are registered in person by a site coordinator.
+        </p>
+        <ContactLink />
+      </div>
     </Screen>
   )
 }
