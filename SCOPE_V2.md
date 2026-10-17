@@ -99,6 +99,17 @@ MUST:
       "Coordinator-verified"; no ratings, map or reviews; labelled "Preview — not live
       yet". Tapping James continues to the tour-pass step. The demo banner stays.
 
+20. Installable PWA (not offline payments). Frontend only: hand-written manifest and
+    service worker, no npm install, no API or DB changes.
+    - manifest.webmanifest: "Sawa Split", start_url "/#/", scope "/", standalone,
+      theme #1B2A41; icons 192, 512 and a 512 maskable, rendered from logo.svg.
+    - sw.js: never caches or intercepts the API, Supabase or any non-GET; navigations
+      network-first (cached copy only offline); hashed assets and icons cache-first;
+      an offline page saying payments and balances need a connection; versioned
+      cache, old caches deleted on activate. Registered only in production builds.
+    - Accessibility pass on the pages touched (lang, labels, button names, 44px tap
+      targets); anything bigger is listed, not fixed, without asking.
+
 STRETCH (only after MUST passes live, ask me first): per-person "ticket" sale: price
 per person, many payments, "N paid", maker closes, auto-close after 2 h.
 
