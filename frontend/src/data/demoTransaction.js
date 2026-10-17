@@ -1,6 +1,7 @@
-// Matches the fixed example in docs/DEMO_SCRIPT.md — "Talek gate · beadwork".
+// Matches the fixed example in docs/DEMO_SCRIPT.md — "Talek gate · beadwork": Wanjiru's
+// KSh 100 product with James as guide (30%), plus KSh 10 photo consent.
 export const demoTransaction = {
-  site: "Talek gate · beadwork",
+  site: "Talek gate · Wanjiru Beadwork",
   total: 110,
   components: [
     {
@@ -8,8 +9,8 @@ export const demoTransaction = {
       label: "Product",
       amount: 100,
       breakdown: [
-        { label: "Maker", amount: 70, highlight: true },
-        { label: "Driver referral", amount: 30 },
+        { label: "Maker · Wanjiru", amount: 70, highlight: true },
+        { label: "Guide · James", amount: 30 },
       ],
     },
     {

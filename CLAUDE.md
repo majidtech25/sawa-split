@@ -6,7 +6,7 @@
 
 ## 0. What this is
 
-**What we're building:** a transparent, point-of-sale value-split payment app. A tourist pays once via M-Pesa or cash; the payment automatically splits between the woman/PWD producer who made the value and the driver who referred the sale — and separately compensates the producer for photo consent. Every shilling collected is either the maker's or the driver's — **there is no platform fee, ever.**
+**What we're building:** a transparent value-split payment app. A tourist pays once via M-Pesa or cash; the payment automatically splits between the woman/PWD producer who made the value and the driver who referred the sale — and separately compensates the producer for photo consent. Every shilling collected is either the maker's or the driver's — **there is no platform fee, ever.**
 
 **Who it's for:** four users, in order of who touches it most: the tourist (no account, pays once), the producer/maker (a woman or PWD artisan/cook/performer, wants a guaranteed transparent share with no dependency on a driver handing over cash), the driver/guide (wants a disclosed, guaranteed referral fee instead of pressuring a sale), and the coordinator (onboards people, watches the ledger, resolves disputes).
 
@@ -357,12 +357,13 @@ A ninth screen, added late in planning: a public marketing homepage (`/` on the 
 
 **Sections, in order:**
 
-1. **Hero.** Headline (from the PRD's one-line summary — "A transparent, point-of-sale value-split app that routes tourist payments directly to the women and PWD producers and drivers who created the value") + a short subhead. Visual: the price-transparency card component itself, rendered live (not a screenshot) as the hero graphic — no photo here, this is the "no photography needed, the product is the visual" moment. Two CTAs: primary "See it work" (scrolls to or links the live demo/reconciliation view), secondary "Read the rulebook" (links out, e.g. to the published Rulebook reference).
-2. **The problem.** The boma stat as a large mono numeral callout — "KSh 300 of every $20 paid at the gate" — with a short paragraph underneath. Text and numerals only, no photo, no chart (this system doesn't use charts to dramatize a number — the number itself, set huge in Plex Mono, is the visual).
-3. **The solution.** Three-step diagram — disclosed price → automatic split (M-Pesa or cash) → paid instantly — using simple line icons (never emoji) each paired with a text label, consistent with the "icon never alone" rule.
-4. **Who it's for.** The one licensed photo lives here, as a duotoned background behind or beside four short persona blurbs (tourist, producer, driver, coordinator — same four from the PRD's personas table).
-5. **Roadmap.** A plain text/timeline strip: Pilot → Local Scale → Multi-Site (from the Implementation Plan's Phase 1–3), no photo, no chart.
-6. **Footer.** Link to the live demo, the GitHub repo, the challenge name, and photo attribution if the license requires it.
+1. **Hero.** Headline "Every shilling has an address." + subhead "Tourists scan a stall's QR, see exactly who earns what, and pay by M-Pesa. Sawa Split splits it on the spot. No platform fee." *(Revised 2026-10-17; it used to be the PRD's one-line summary.)* Visual: the price-transparency card component itself, rendered live (not a screenshot) as the hero graphic — no photo here, this is the "no photography needed, the product is the visual" moment. Two CTAs: primary "See it work" (scrolls to or links the live demo/reconciliation view), secondary "Read the rulebook" (links out, e.g. to the published Rulebook reference).
+2. **The problem.** The boma stat as a large mono numeral callout — "KSh 300 of every $20 paid at the gate" — with a short paragraph underneath and a source line (Prescott College students, "A Scandal in Maasailand…", Maasai Cultural Preservation Project, June 2005: in 2005 the village kept KSh 300 (US$3.50) of the $20, 17.5%; early 1990s about half). Text and numerals only, no photo, no chart (this system doesn't use charts to dramatize a number — the number itself, set huge in Plex Mono, is the visual).
+3. **How it works.** Three steps — "Scan the stall" → "See every share" → "Pay, and it splits" — plus a "Credited instantly, paid out daily" note, using simple line icons (never emoji) each paired with a text label, consistent with the "icon never alone" rule.
+4. **Who it's for.** The one licensed photo lives here, as a duotoned background behind or beside four short persona blurbs, each with a matching outline icon (tourist, producer, "Guides, drivers and agents", coordinator).
+4b. **Why it can be trusted.** No platform fee; prices can't be changed (signed); everyone verified in person by a coordinator; every action on a permanent record.
+5. **Roadmap.** A plain text/timeline strip: Pilot → Local Scale → Multi-Site (from the Implementation Plan's Phase 1–3), then "Next: per-member group payouts, Kiswahili, instant M-Pesa payouts". No photo, no chart.
+6. **Footer.** Link to the live demo (no GitHub link: the repo is private), the challenge name, and photo attribution if the license requires it.
 
 ## 7.2 v2: open sales, stall QR and referral codes *(SCOPE_V2.md, binding; migration 0017)*
 

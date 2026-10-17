@@ -9,14 +9,6 @@ export default function SiteFooter() {
           <a href={LIVE_DEMO_PRICE_CARD} className="text-sawa-green hover:underline">
             Live demo
           </a>
-          <a
-            href="https://github.com/majidtech25/sawa-split"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sawa-green hover:underline"
-          >
-            GitHub repo
-          </a>
         </div>
         <p className="text-xs">
           Photo by{" "}

@@ -4,13 +4,13 @@
 
 ## 1. One-line summary
 
-A transparent, point-of-sale value-split app that routes tourist payments — including photo-consent compensation — directly to the women and PWD producers and drivers who created the value, at the moment of payment.
+A transparent value-split app that routes tourist payments — including photo-consent compensation — directly to the women and PWD producers and drivers who created the value, at the moment of payment.
 
 ## 2. Problem statement
 
 Money and cultural/image value already flow through Kenya's tourism economy toward women and PWD producers — it is intercepted before it reaches them.
 
-- **Money leakage:** an informal, undisclosed commission chain (drivers, guides, shop owners) captures most of what a tourist pays for a craft, meal, or cultural visit before the maker sees it. Documented case: village boma entrance-fee share fell from ~50% (early 1990s) to roughly 1/17th of a $20 fee (mid-2000s), with drivers openly steering pricing and sales.
+- **Money leakage:** an informal, undisclosed commission chain (drivers, guides, shop owners) captures most of what a tourist pays for a craft, meal, or cultural visit before the maker sees it. Documented case: a Maasai village kept about half of the boma entrance fee in the early 1990s (about KSh 2,000 per vehicle), but in 2005 only about KSh 300 (US$3.50) of the $20 each tourist paid, 17.5% (less than a fifth), with drivers openly steering pricing and sales. Source: "A Scandal in Maasailand that Cheats both Communities and Tourists", Prescott College students, Maasai Cultural Preservation Project, June 2005, https://maasaicpp.wordpress.com/wp-content/uploads/2009/02/culturalboma.pdf
 - **Image/cultural leakage:** tourists photograph Maasai beadwork/dance, coastal cooking, and other cultural labor for free — no consent mechanism, no compensation, even where a site already collects an entrance/photo fee at the operator level.
 
 Both are one pattern: value tourists already pay for is created by women and PWDs, and the current transaction structure routes it around them.

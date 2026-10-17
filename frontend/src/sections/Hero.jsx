@@ -1,34 +1,48 @@
+import { ShieldCheck } from "lucide-react"
 import PriceTransparencyCard from "../components/PriceTransparencyCard"
-import { LinkButton } from "../components/Button"
+import { LinkButton, ScrollButton } from "../components/Button"
 import { demoTransaction } from "../data/demoTransaction"
 import { LIVE_DEMO_PRICE_CARD } from "../data/liveDemo"
+
+// The checkout a tourist sees, in a phone outline: the product is the visual (CLAUDE.md 7.1).
+function PhoneFrame({ children }) {
+  return (
+    <div className="w-full max-w-[340px] rounded-sawa border-[10px] border-sawa-text bg-sawa-bg shadow-[0_8px_32px_rgba(26,26,26,0.16)]">
+      <div className="flex items-center justify-between border-b border-sawa-border px-3 py-2 text-xs">
+        <span className="font-bold tracking-tight">
+          Sawa <span className="text-sawa-green">Split</span>
+        </span>
+        <span className="inline-flex items-center gap-1 text-sawa-green">
+          <ShieldCheck aria-hidden="true" className="size-3.5" /> Verified checkout
+        </span>
+      </div>
+      <div className="p-3">{children}</div>
+    </div>
+  )
+}
 
 export default function Hero() {
   return (
     <section className="mx-auto flex max-w-6xl flex-col gap-12 px-6 py-16 md:flex-row md:items-center md:py-24">
       <div className="flex-1">
-        <h1 className="text-3xl font-semibold leading-tight text-sawa-text md:text-4xl">
-          A transparent, point-of-sale value-split app that routes tourist
-          payments directly to the women and PWD producers and drivers who
-          created the value
+        <h1 className="text-4xl font-semibold leading-tight text-sawa-text md:text-5xl">
+          Every shilling has an address.
         </h1>
-        <p className="mt-4 max-w-lg text-base text-sawa-text-muted">
-          Every shilling a tourist pays for a craft, meal, or photo goes
-          straight to the maker and the driver who earned it — split
-          automatically, disclosed before you pay. No platform fee, ever.
+        <p className="mt-5 max-w-lg text-base text-sawa-text-muted md:text-lg">
+          Tourists scan a stall's QR, see exactly who earns what, and pay by
+          M-Pesa. Sawa Split splits it on the spot. No platform fee.
         </p>
         <div className="mt-8 flex flex-wrap gap-4">
-          <LinkButton href={LIVE_DEMO_PRICE_CARD}>See it work</LinkButton>
-          <LinkButton
-            href="https://claude.ai/artifact/PWnxWEpT7X36HCYXYCGj1D"
-            external
-          >
-            Read the rulebook
+          <LinkButton href={LIVE_DEMO_PRICE_CARD} variant="filled">
+            See a live checkout
           </LinkButton>
+          <ScrollButton target="how-it-works">How it works</ScrollButton>
         </div>
       </div>
       <div className="flex flex-1 justify-center md:justify-end">
-        <PriceTransparencyCard {...demoTransaction} />
+        <PhoneFrame>
+          <PriceTransparencyCard {...demoTransaction} className="shadow-none" />
+        </PhoneFrame>
       </div>
     </section>
   )
