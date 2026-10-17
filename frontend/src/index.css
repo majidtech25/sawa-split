@@ -8,7 +8,7 @@
   --color-sawa-border: #e4e2da;
   --color-sawa-green: #1e5b3a;
   --color-sawa-terracotta: #8c1d1d;
-  --color-sawa-ochre: #b97a22;
+  --color-sawa-ochre: #9b661d; /* the Pay button: white text 4.87:1 (was #b97a22, 3.58:1) */
 
   --radius-sawa: 8px;
 
