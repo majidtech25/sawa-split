@@ -5,6 +5,7 @@ import Problem from "../sections/Problem"
 import Solution from "../sections/Solution"
 import WhoItsFor from "../sections/WhoItsFor"
 import Trust from "../sections/Trust"
+import BeforeAfter from "../sections/BeforeAfter"
 import Roadmap from "../sections/Roadmap"
 import Contact from "../sections/Contact"
 import SiteFooter from "../sections/SiteFooter"
@@ -22,6 +23,7 @@ export default function Home() {
       <Solution />
       <WhoItsFor />
       <Trust />
+      <BeforeAfter />
       <Roadmap />
       <Contact />
       <SiteFooter />

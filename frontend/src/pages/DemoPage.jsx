@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { Check, Compass, Hand, Wallet } from "lucide-react"
+import { BadgeCheck, Check, ChevronRight, Compass, Hand, Wallet } from "lucide-react"
 import PriceTransparencyCard from "../components/PriceTransparencyCard"
 import { PayButton, Screen, SecondaryButton, StatusBadge, VerifiedStamp } from "../components/ui"
 import { cardProps } from "../lib/checkout"
@@ -12,13 +12,19 @@ import { ksh } from "../lib/format"
 // agreed price rounded down, the maker the rest plus the photo fee (never split).
 const SALE = { maker: "Wanjiru Beadwork", makerFirst: "Wanjiru", site: "Talek gate", amount: 700, photo: 10, pct: 30 }
 const GUIDE = { name: "James", type: "Driver" }
+// "Find a verified guide near you" is the next step on the roadmap (SCOPE_V2 MUST 19):
+// shown here as a static preview, not built. No ratings, map or reviews.
+const NEARBY = [
+  { name: "James", type: "Driver" },
+  { name: "Hassan", type: "Agent" },
+]
 
 function split(withGuide) {
   const guide = withGuide ? Math.floor((SALE.amount * SALE.pct) / 100) : 0
   return { guide, maker: SALE.amount - guide + SALE.photo, total: SALE.amount + SALE.photo }
 }
 
-const STEPS = ["Your guide", "Checkout", "Receipt", "Split credited"]
+const STEPS = ["Find a guide", "Your guide", "Checkout", "Receipt", "Split credited"]
 
 function Progress({ step }) {
   return (
@@ -41,11 +47,11 @@ function Card({ children }) {
 
 export default function DemoPage() {
   const navigate = useNavigate()
-  // ?step=0..3 opens a step directly, with James kept as the guide (for links and screenshots).
+  // ?step=0..4 opens a step directly, with James kept as the guide (for links and screenshots).
   const [search] = useSearchParams()
   const start = Math.min(Math.max(Number.parseInt(search.get("step"), 10) || 0, 0), STEPS.length - 1)
   const [step, setStep] = useState(start)
-  const [withGuide, setWithGuide] = useState(start >= 2 || search.get("guide") === "yes" ? true : null) // null until "Still with James?" is answered
+  const [withGuide, setWithGuide] = useState(start >= 3 || search.get("guide") === "yes" ? true : null) // null until "Still with James?" is answered
   const [paying, setPaying] = useState(false)
   const s = split(withGuide !== false)
 
@@ -54,7 +60,7 @@ export default function DemoPage() {
     if (!paying) return undefined
     const timer = setTimeout(() => {
       setPaying(false)
-      setStep(2)
+      setStep(3)
     }, 1800)
     return () => clearTimeout(timer)
   }, [paying])
@@ -83,6 +89,57 @@ export default function DemoPage() {
         <Progress step={step} />
 
         {step === 0 && (
+          <>
+            <div>
+              <span className="inline-flex items-center rounded-sawa border border-dashed border-sawa-text-muted/60 px-2 py-0.5 text-xs font-semibold text-sawa-text-muted">
+                Preview — not live yet
+              </span>
+              <h1 className="mt-3 text-2xl font-semibold">Find your guide — coming next</h1>
+              <p className="mt-1 text-[15px] text-sawa-text-muted">
+                Verified guides at Talek gate. Every one was registered in person by a coordinator.
+              </p>
+            </div>
+            <ul className="flex flex-col gap-3">
+              {NEARBY.map((g) => {
+                const inner = (
+                  <>
+                    <div>
+                      <div className="text-[15px] font-semibold text-sawa-text">
+                        {g.name} · {g.type}
+                      </div>
+                      <div className="mt-1 inline-flex items-center gap-1 text-[13px] text-sawa-green">
+                        <BadgeCheck aria-hidden="true" className="size-4" /> Coordinator-verified
+                      </div>
+                    </div>
+                    {g.name === GUIDE.name ? (
+                      <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-sawa-green" />
+                    ) : (
+                      <span className="text-xs text-sawa-text-muted">This demo follows {GUIDE.name}</span>
+                    )}
+                  </>
+                )
+                const box = "flex w-full items-center justify-between gap-3 rounded-sawa border border-sawa-border bg-sawa-surface p-4 text-left"
+                return (
+                  <li key={g.name}>
+                    {g.name === GUIDE.name ? (
+                      <button
+                        type="button"
+                        onClick={() => setStep(1)}
+                        className={`${box} hover:border-sawa-green focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green`}
+                      >
+                        {inner}
+                      </button>
+                    ) : (
+                      <div className={box}>{inner}</div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </>
+        )}
+
+        {step === 1 && (
           <Card>
             <p className="text-[13px] text-sawa-text-muted">You scanned your guide's QR. Registered Sawa Split guide</p>
             <h1 className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xl font-semibold">
@@ -94,13 +151,13 @@ export default function DemoPage() {
             <p className="mt-3 text-[15px] text-sawa-text-muted">
               James is running a tour today. Joining it means each stall's checkout shows his disclosed share.
             </p>
-            <SecondaryButton className="mt-5 w-full" onClick={() => setStep(1)}>
+            <SecondaryButton className="mt-5 w-full" onClick={() => setStep(2)}>
               Use James as my guide today
             </SecondaryButton>
           </Card>
         )}
 
-        {step === 1 && (
+        {step === 2 && (
           <>
             <div>
               <h1 className="text-2xl font-semibold">{SALE.maker}</h1>
@@ -156,7 +213,7 @@ export default function DemoPage() {
           </>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <>
             <section aria-live="polite" className="flex items-center gap-5">
               <VerifiedStamp amount={s.total} at={new Date().toISOString()} place={SALE.site} />
@@ -173,13 +230,13 @@ export default function DemoPage() {
               </p>
               <p>Nothing was taken out for Sawa Split.</p>
             </div>
-            <SecondaryButton className="w-full" onClick={() => setStep(3)}>
+            <SecondaryButton className="w-full" onClick={() => setStep(4)}>
               See the split credited
             </SecondaryButton>
           </>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <>
             <h1 className="text-2xl font-semibold">Split credited</h1>
             <div className="grid gap-3">
