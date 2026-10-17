@@ -86,6 +86,19 @@ MUST:
     confirm buttons show shares, full tour refuses), clean up, report, stop.
     New columns must be nullable or have a default (old and new code side by side).
 
+19. Homepage roadmap preview (V3 shown, not built). Frontend only: no API, DB or
+    npm changes.
+    - Roadmap: the "Next:" line becomes three columns. Now (live): transparent split,
+      M-Pesa + cash, tours, batched payouts. Next: Find a verified guide near you.
+      Later: more sites, Kiswahili, multiple referrers per payment.
+    - Before/after strip above the roadmap: "Today: guides wait at the gate and
+      approach tourists." / "Next: tourists find verified guides — and every shilling
+      still has an address."
+    - /#/demo: new first step "Find your guide — coming next" (?step numbers shift so
+      step=0 is this one). Static sample list: James · Driver, Hassan · Agent, each
+      "Coordinator-verified"; no ratings, map or reviews; labelled "Preview — not live
+      yet". Tapping James continues to the tour-pass step. The demo banner stays.
+
 STRETCH (only after MUST passes live, ask me first): per-person "ticket" sale: price
 per person, many payments, "N paid", maker closes, auto-close after 2 h.
 
