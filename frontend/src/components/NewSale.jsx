@@ -124,9 +124,10 @@ export default function NewSale({ stallCode, photoFee, service = false, onChange
 
       {sale && (
         <div aria-live="polite" className="rounded-sawa border border-sawa-border p-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="font-mono text-2xl font-bold tabular-nums">{ksh(sale.total_amount)}</span>
-            <span className={`inline-flex items-center gap-1.5 text-sm font-semibold ${status.tone}`}>
+          {/* The amount never breaks ("KSh" / "200"); a long status wraps, or drops below it. */}
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <span className="whitespace-nowrap font-mono text-2xl font-bold tabular-nums">{ksh(sale.total_amount)}</span>
+            <span className={`inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold ${status.tone}`}>
               {status.icon ?? <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-sawa-text-muted motion-reduce:animate-none" />}
               {status.label}
             </span>
