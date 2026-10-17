@@ -1,0 +1,15 @@
+{
+  "name": "Sawa Split",
+  "short_name": "Sawa Split",
+  "description": "Every shilling has an address: see who earns what, pay by M-Pesa, and the payment splits on the spot. No platform fee.",
+  "start_url": "/#/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#1B2A41",
+  "background_color": "#FAFAF8",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
