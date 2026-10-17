@@ -43,8 +43,8 @@ export default function Solution() {
           <div>
             <h3 className="text-sm font-semibold text-sawa-text">Credited instantly, paid out daily</h3>
             <p className="mt-1 text-sm text-sawa-text-muted">
-              Shares are credited the moment a payment is confirmed and sent to M-Pesa once they reach KSh 500, or every
-              evening at 18:00.
+              Shares are credited the moment a payment is confirmed. Once they reach KSh 500, they're sent to M-Pesa on
+              request, or automatically at 18:00 each evening.
             </p>
           </div>
         </div>
