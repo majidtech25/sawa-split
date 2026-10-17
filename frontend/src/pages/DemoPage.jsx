@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { BadgeCheck, Check, ChevronRight, Compass, Hand, Wallet } from "lucide-react"
 import PriceTransparencyCard from "../components/PriceTransparencyCard"
-import { PayButton, Screen, SecondaryButton, StatusBadge, VerifiedStamp } from "../components/ui"
+import { PayButton, Screen, SecondaryButton, StatusBadge, VerifiedStamp, tapTarget } from "../components/ui"
 import { cardProps } from "../lib/checkout"
 import { ksh } from "../lib/format"
 
@@ -206,7 +206,7 @@ export default function DemoPage() {
                   <button
                     type="button"
                     onClick={() => setWithGuide(null)}
-                    className="text-left text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline"
+                    className={`${tapTarget} -mt-3 self-start text-left text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline`}
                   >
                     Change my answer
                   </button>
@@ -267,15 +267,15 @@ export default function DemoPage() {
               Credited the moment the payment is confirmed. Once a balance reaches KSh 500, it's sent to M-Pesa on request,
               or automatically at 18:00 each evening.
             </p>
-            <div className="flex flex-col gap-3 border-t border-sawa-border pt-5">
+            <div className="flex flex-col border-t border-sawa-border pt-3">
               <button
                 type="button"
                 onClick={() => navigate("/", { state: { scrollTo: "contact" } })}
-                className="text-left text-[15px] font-semibold text-sawa-green underline-offset-2 hover:underline"
+                className={`${tapTarget} self-start text-left text-[15px] font-semibold text-sawa-green underline-offset-2 hover:underline`}
               >
                 Try it with your own team: contact us
               </button>
-              <button type="button" onClick={restart} className="text-left text-sm text-sawa-text-muted underline-offset-2 hover:underline">
+              <button type="button" onClick={restart} className={`${tapTarget} self-start text-left text-sm text-sawa-text-muted underline-offset-2 hover:underline`}>
                 Start the demo again
               </button>
             </div>

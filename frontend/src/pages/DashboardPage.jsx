@@ -147,7 +147,7 @@ function WithdrawPanel({ available, owedToDrivers, withdrawals, onWithdrawn }) {
 }
 
 const quietButton =
-  "text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+  "inline-flex min-h-11 items-center text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
 
 // Closing an account is asked for here and decided by the coordinator (CLAUDE.md
 // rule 17). Nothing is deleted: the history stays, and what's owed is paid out first.

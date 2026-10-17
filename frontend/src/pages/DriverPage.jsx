@@ -97,7 +97,7 @@ export default function DriverPage() {
                           clearTourPass()
                           setPass(null)
                         }}
-                        className="mt-2 text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline"
+                        className="inline-flex min-h-11 items-center text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline"
                       >
                         Stop using {guide.first_name} as my guide
                       </button>

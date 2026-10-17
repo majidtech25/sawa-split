@@ -4,6 +4,10 @@ import { eatTime, ksh } from "../lib/format"
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
 
+// A 44px-tall tap area for text links and small controls (WCAG target size), with no
+// border, fill or padding, so a text link still looks like a link.
+export const tapTarget = "inline-flex min-h-11 items-center"
+
 // The payment flow never stretches past ~420px, even on desktop (UI_UX_DESIGN.md section 4).
 export function Screen({ children, className = "" }) {
   return <main className={`mx-auto w-full max-w-[420px] px-4 py-8 ${className}`}>{children}</main>
@@ -20,7 +24,7 @@ export function PayButton({ children, busy = false, ...props }) {
       type="button"
       {...props}
       disabled={busy || props.disabled}
-      className={`w-full rounded-sawa bg-sawa-ochre px-4 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-[#8c5a14] active:bg-[#8c5a14] disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
+      className={`min-h-11 w-full rounded-sawa bg-sawa-ochre px-4 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-[#8c5a14] active:bg-[#8c5a14] disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
     >
       {children}
     </button>
@@ -32,7 +36,7 @@ export function SecondaryButton({ children, className = "", type = "button", ...
     <button
       type={type}
       {...props}
-      className={`inline-flex items-center justify-center gap-2 rounded-sawa border border-sawa-green px-4 py-2.5 text-sm font-semibold text-sawa-green transition-colors hover:bg-sawa-green hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-sawa-green ${focusRing} ${className}`}
+      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-sawa border border-sawa-green px-4 py-2.5 text-sm font-semibold text-sawa-green transition-colors hover:bg-sawa-green hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-sawa-green ${focusRing} ${className}`}
     >
       {children}
     </button>

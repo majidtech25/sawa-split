@@ -33,7 +33,7 @@ const ROLE_HOME = {
 }
 
 const navLink = ({ isActive }) =>
-  `whitespace-nowrap ${focusRing} ${isActive ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"}`
+  `inline-flex min-h-11 items-center whitespace-nowrap ${focusRing} ${isActive ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"}`
 
 // The signed-in profile, only while Supabase holds a live session (SCOPE_V2 MUST 14):
 // a missing or expired token (one that can't be refreshed) means logged out, and the
@@ -72,8 +72,8 @@ function AppHeader({ width = "card", nav = null, tourist = false }) {
   return (
     <header className="border-b border-sawa-border bg-sawa-surface">
       {/* On phones a nav drops to its own row so the brand and "Log out" never wrap. */}
-      <div className={`mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 py-3 ${HEADER_WIDTHS[width]}`}>
-        <Link to="/" className={`text-base ${focusRing}`}>
+      <div className={`mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 py-1.5 ${HEADER_WIDTHS[width]}`}>
+        <Link to="/" className={`inline-flex min-h-11 items-center text-base ${focusRing}`}>
           <Brand />
         </Link>
         {nav && <div className="order-last w-full text-sm md:order-none md:ml-auto md:w-auto">{nav}</div>}
@@ -92,13 +92,13 @@ function AppHeader({ width = "card", nav = null, tourist = false }) {
                   <span aria-hidden="true" className="-mx-2 text-sawa-text-muted">·</span>
                 </>
               )}
-              <button type="button" onClick={logOut} className={`whitespace-nowrap text-sawa-text-muted hover:text-sawa-text ${focusRing}`}>
+              <button type="button" onClick={logOut} className={`inline-flex min-h-11 items-center whitespace-nowrap text-sawa-text-muted hover:text-sawa-text ${focusRing}`}>
                 Log out
               </button>
             </>
           ) : (
             pathname !== "/login" && (
-              <Link to="/login" className={`whitespace-nowrap text-sawa-green hover:underline ${focusRing}`}>
+              <Link to="/login" className={`inline-flex min-h-11 items-center whitespace-nowrap text-sawa-green hover:underline ${focusRing}`}>
                 Log in
               </Link>
             )

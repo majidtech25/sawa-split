@@ -206,7 +206,7 @@ function SaleCheckout({ sale, onPaying }) {
         )}
         {code && (
           <div>
-            <button type="button" onClick={() => setCode("")} className="text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline">
+            <button type="button" onClick={() => setCode("")} className="inline-flex min-h-11 items-center text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline">
               Remove the guide code
             </button>
           </div>

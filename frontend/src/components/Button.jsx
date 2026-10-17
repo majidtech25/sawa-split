@@ -1,5 +1,5 @@
 const base =
-  "inline-flex items-center gap-2 rounded-sawa border border-sawa-green px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+  "inline-flex min-h-11 items-center gap-2 rounded-sawa border border-sawa-green px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
 
 // Outline by default; "filled" for the one primary action on a screen. Ochre stays the
 // Pay button's alone (CLAUDE.md section 7), so a filled button is green. The "onDark"

@@ -27,7 +27,7 @@ function Copyable({ icon: Icon, label, value }) {
       <button
         type="button"
         onClick={copy}
-        className="inline-flex items-center gap-1.5 text-sm text-sawa-green underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+        className="inline-flex min-h-11 items-center gap-1.5 text-sm text-sawa-green underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
       >
         <Copy aria-hidden="true" className="size-4" />
         {copied ? "Copied" : `Copy ${label.toLowerCase()}`}

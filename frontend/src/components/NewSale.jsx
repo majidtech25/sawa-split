@@ -117,7 +117,7 @@ export default function NewSale({ stallCode, photoFee, service = false, onChange
     <section aria-label="New sale" className="flex flex-col gap-3 rounded-sawa border-2 border-sawa-green bg-sawa-surface p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-xl font-semibold">New sale</h2>
-        <Link to={`/stand/${encodeURIComponent(stallCode)}`} className="inline-flex items-center gap-1.5 text-sm text-sawa-green hover:underline">
+        <Link to={`/stand/${encodeURIComponent(stallCode)}`} className="inline-flex min-h-11 items-center gap-1.5 text-sm text-sawa-green hover:underline">
           <Printer aria-hidden="true" className="size-4" /> Print my stand QR
         </Link>
       </div>
@@ -160,7 +160,7 @@ export default function NewSale({ stallCode, photoFee, service = false, onChange
             </SecondaryButton>
           )}
           {sale.status === "open" && (
-            <button type="button" onClick={cancel} disabled={busy} className="mt-2 text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline">
+            <button type="button" onClick={cancel} disabled={busy} className="inline-flex min-h-11 items-center text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline">
               Cancel this sale
             </button>
           )}

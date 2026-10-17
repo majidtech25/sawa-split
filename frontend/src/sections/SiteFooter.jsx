@@ -8,7 +8,7 @@ export default function SiteFooter() {
         <Brand className="text-base text-sawa-text" />
         <p>Built for the Future Leaders Challenge Eastern Africa.</p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-          <a href={LIVE_DEMO_PRICE_CARD} className="text-sawa-green hover:underline">
+          <a href={LIVE_DEMO_PRICE_CARD} className="inline-flex min-h-11 items-center text-sawa-green hover:underline">
             Live demo
           </a>
         </div>
@@ -18,7 +18,7 @@ export default function SiteFooter() {
             href="https://unsplash.com/@spliff_dj_joe"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sawa-green hover:underline"
+            className="inline-flex min-h-11 items-center text-sawa-green hover:underline"
           >
             Dwayne joe
           </a>{" "}
@@ -27,7 +27,7 @@ export default function SiteFooter() {
             href="https://unsplash.com/photos/dnhm5nzXGl4"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sawa-green hover:underline"
+            className="inline-flex min-h-11 items-center text-sawa-green hover:underline"
           >
             Unsplash
           </a>
