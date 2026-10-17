@@ -14,6 +14,7 @@ import CoordinatorPage from "./pages/CoordinatorPage"
 import PriceCardsPage from "./pages/PriceCardsPage"
 import RegisterPage from "./pages/RegisterPage"
 import { ShieldCheck } from "lucide-react"
+import Brand from "./components/Brand"
 import { currentProfile, endSession, forgetProfile, supabase } from "./lib/supabase"
 
 const focusRing =
@@ -72,8 +73,8 @@ function AppHeader({ width = "card", nav = null, tourist = false }) {
     <header className="border-b border-sawa-border bg-sawa-surface">
       {/* On phones a nav drops to its own row so the brand and "Log out" never wrap. */}
       <div className={`mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 py-3 ${HEADER_WIDTHS[width]}`}>
-        <Link to="/" className={`whitespace-nowrap text-base font-bold tracking-tight ${focusRing}`}>
-          Sawa <span className="text-sawa-green">Split</span>
+        <Link to="/" className={`text-base ${focusRing}`}>
+          <Brand />
         </Link>
         {nav && <div className="order-last w-full text-sm md:order-none md:ml-auto md:w-auto">{nav}</div>}
         <div className={`ml-auto flex items-center gap-4 text-sm ${nav ? "md:ml-0" : ""}`}>

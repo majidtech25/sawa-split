@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
+import Brand from "../components/Brand"
 import QRCode from "qrcode"
 import { ErrorNote } from "../components/ui"
 import { api } from "../lib/api"
@@ -34,9 +35,7 @@ export default function StandPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-[520px] flex-col items-center justify-center gap-5 px-4 py-10 text-center">
-      <p className="text-base font-bold tracking-tight">
-        Sawa <span className="text-sawa-green">Split</span>
-      </p>
+      <Brand className="text-base" />
       <h1 className="text-3xl font-semibold">{stall.maker.name}</h1>
       {stall.site && <p className="text-lg text-sawa-text-muted">{stall.site}</p>}
       <img src={qr} alt={`QR code for ${stall.maker.name}'s stall`} className="w-full max-w-[360px] rounded-sawa border border-sawa-border" />

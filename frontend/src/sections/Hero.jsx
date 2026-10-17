@@ -1,4 +1,5 @@
 import { ShieldCheck } from "lucide-react"
+import Brand from "../components/Brand"
 import PriceTransparencyCard from "../components/PriceTransparencyCard"
 import { LinkButton, ScrollButton } from "../components/Button"
 import { demoTransaction } from "../data/demoTransaction"
@@ -8,9 +9,7 @@ function PhoneFrame({ children }) {
   return (
     <div className="w-full max-w-[340px] rounded-sawa border-[10px] border-sawa-text bg-sawa-bg shadow-[0_8px_32px_rgba(26,26,26,0.16)]">
       <div className="flex items-center justify-between border-b border-sawa-border px-3 py-2 text-xs">
-        <span className="font-bold tracking-tight">
-          Sawa <span className="text-sawa-green">Split</span>
-        </span>
+        <Brand size={16} />
         <span className="inline-flex items-center gap-1 text-sawa-green">
           <ShieldCheck aria-hidden="true" className="size-3.5" /> Verified checkout
         </span>
