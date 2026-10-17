@@ -2,7 +2,6 @@ import { ShieldCheck } from "lucide-react"
 import PriceTransparencyCard from "../components/PriceTransparencyCard"
 import { LinkButton, ScrollButton } from "../components/Button"
 import { demoTransaction } from "../data/demoTransaction"
-import { LIVE_DEMO_PRICE_CARD } from "../data/liveDemo"
 
 // The checkout a tourist sees, in a phone outline: the product is the visual (CLAUDE.md 7.1).
 function PhoneFrame({ children }) {
@@ -33,8 +32,8 @@ export default function Hero() {
           M-Pesa. Sawa Split splits it on the spot. No platform fee.
         </p>
         <div className="mt-8 flex flex-wrap gap-4">
-          <LinkButton href={LIVE_DEMO_PRICE_CARD} variant="filled">
-            See a live checkout
+          <LinkButton href="#/demo" variant="filled">
+            Try the demo
           </LinkButton>
           <ScrollButton target="how-it-works">How it works</ScrollButton>
         </div>

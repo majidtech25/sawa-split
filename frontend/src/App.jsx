@@ -5,6 +5,7 @@ import LoginPage from "./pages/LoginPage"
 import { CheckoutPage, PriceCardPage } from "./pages/PayPage"
 import DriverPage from "./pages/DriverPage"
 import StallPage from "./pages/StallPage"
+import DemoPage from "./pages/DemoPage"
 import StandPage from "./pages/StandPage"
 import DashboardPage from "./pages/DashboardPage"
 import ReceiptPage from "./pages/ReceiptPage"
@@ -172,6 +173,7 @@ export default function App() {
         <Route path="/pay/:producerId/checkout" element={<TouristScreen><CheckoutPage /></TouristScreen>} />
         <Route path="/driver/:code" element={<TouristScreen><DriverPage /></TouristScreen>} />
         <Route path="/stall/:code" element={<TouristScreen><StallPage /></TouristScreen>} />
+        <Route path="/demo" element={<><AppHeader /><DemoPage /></>} />
         <Route path="/stand/:code" element={<StandPage />} />
         <Route path="/receipt/:transactionId" element={<TouristScreen><ReceiptPage /></TouristScreen>} />
         <Route path="/login" element={<><AppHeader /><LoginPage /></>} />
