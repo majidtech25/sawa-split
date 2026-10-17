@@ -47,11 +47,14 @@ function Card({ children }) {
 
 export default function DemoPage() {
   const navigate = useNavigate()
-  // ?step=0..4 opens a step directly, with James kept as the guide (for links and screenshots).
+  // ?step=0..4 opens a step directly (for links and screenshots): from the checkout on,
+  // with James as the guide, or without him with ?guide=no.
   const [search] = useSearchParams()
   const start = Math.min(Math.max(Number.parseInt(search.get("step"), 10) || 0, 0), STEPS.length - 1)
   const [step, setStep] = useState(start)
-  const [withGuide, setWithGuide] = useState(start >= 3 || search.get("guide") === "yes" ? true : null) // null until "Still with James?" is answered
+  const [withGuide, setWithGuide] = useState(
+    search.get("guide") === "no" ? false : start >= 3 || search.get("guide") === "yes" ? true : null,
+  ) // null until "Still with James?" is answered
   const [paying, setPaying] = useState(false)
   const s = split(withGuide !== false)
 
@@ -170,8 +173,8 @@ export default function DemoPage() {
                   If {GUIDE.name} brought you here, he gets his disclosed share of this sale.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
-                  <SecondaryButton onClick={() => setWithGuide(true)}>Yes</SecondaryButton>
-                  <SecondaryButton onClick={() => setWithGuide(false)}>No, I'm done</SecondaryButton>
+                  <SecondaryButton onClick={() => setWithGuide(true)}>Yes, still with {GUIDE.name}</SecondaryButton>
+                  <SecondaryButton onClick={() => setWithGuide(false)}>No, not with {GUIDE.name}</SecondaryButton>
                 </div>
               </Card>
             ) : (
@@ -182,7 +185,7 @@ export default function DemoPage() {
                       <Check aria-hidden="true" className="size-4" /> Guide · {GUIDE.name}
                     </span>
                   ) : (
-                    <span className="text-sawa-text-muted">No guide: the maker gets everything.</span>
+                    <span className="text-sawa-text-muted">No guide, so {SALE.makerFirst} keeps 100%.</span>
                   )}
                 </p>
                 <PriceTransparencyCard {...card} />
