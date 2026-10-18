@@ -20,7 +20,7 @@ export default function SiteFooter() {
         {/* Required by the licence of the problem section's photo (CC BY-SA 4.0): keep it. */}
         <p className="text-xs text-white/75">
           <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className={`${footerLink} !text-white/75`}>
-            Photo: Daniel Case, CC BY-SA 4.0
+            Photo: Daniel Case, CC BY-SA 4.0, edited
           </a>
         </p>
       </div>
