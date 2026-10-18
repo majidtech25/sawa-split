@@ -20,7 +20,7 @@ export default function Problem() {
       {/* Dark navy over the photo, so white text stays well above 4.5:1 on every part of it. */}
       <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[#1B2A41]/80" />
       <div className="mx-auto max-w-3xl text-center">
-        <p className="font-mono text-4xl font-bold leading-tight tabular-nums text-white md:text-6xl">
+        <p className="font-mono text-[1.75rem] font-bold leading-tight tabular-nums text-white sm:text-4xl md:text-6xl">
           KSh 300 of every $20 paid at the gate
         </p>
         <p className="mx-auto mt-6 max-w-2xl text-base text-white/90">
