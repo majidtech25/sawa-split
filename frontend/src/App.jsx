@@ -86,16 +86,17 @@ function useCurrentSection(active) {
 
 // Signed in: the role's home link (or the coordinator's nav) and "Log out". Signed
 // out: "Log in". There's no sign-up link: accounts are created by a coordinator.
-// Members and visitors also get the homepage section links: in the middle on wide
-// screens, in a "Menu" on phones. Tourist pages show only the logo and "Verified
-// checkout" (MUST 18d); coordinator pages keep their own nav.
+// On the homepage it also has the section links: in the middle on wide screens, in a
+// "Menu" on phones. Every other page has just the logo and auth. Tourist pages show
+// only the logo and "Verified checkout" (MUST 18d); coordinator pages keep their own nav.
 function AppHeader({ nav = null, tourist = false }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { checked, profile } = useSession()
   const home = profile && ROLE_HOME[profile.role]
-  const sections = !tourist && !nav
-  const current = useCurrentSection(sections && pathname === "/")
+  // Section links (and the phone Menu) only on the homepage; elsewhere just the logo and auth.
+  const sections = !tourist && !nav && pathname === "/"
+  const current = useCurrentSection(sections)
   const [menuOpen, setMenuOpen] = useState(false)
   const headerRef = useRef(null)
   const taps = useRef(0) // makes each tap a new navigation, so the same link scrolls again
