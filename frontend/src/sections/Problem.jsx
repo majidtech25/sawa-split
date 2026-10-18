@@ -9,9 +9,7 @@ const SOURCE = "https://maasaicpp.wordpress.com/wp-content/uploads/2009/02/cultu
 // The background: "Talek River at Talek, Kenya" by Daniel Case (CC BY-SA 4.0), taken from
 // the bridge near Talek gate. Cropped to leave out the one person in the original, then
 // toned and compressed; the edited file stays CC BY-SA 4.0. It is not the 2005 study
-// village, and the caption doesn't say it is.
-const PHOTO_PAGE = "https://commons.wikimedia.org/wiki/File:Talek_River_at_Talek,_Kenya.jpg"
-const PHOTO_LICENCE = "https://creativecommons.org/licenses/by-sa/4.0/"
+// village. Its credit is in the footer (sections/SiteFooter.jsx), as the licence requires.
 
 const lightLink = "text-white underline underline-offset-2 hover:no-underline"
 
@@ -37,17 +35,6 @@ export default function Problem() {
             "A Scandal in Maasailand that Cheats both Communities and Tourists"
           </a>
           , Prescott College students, Maasai Cultural Preservation Project, June 2005 (PDF).
-        </p>
-        <p className="mt-8 text-xs text-white/85">
-          Near Talek gate, Maasai Mara.{" "}
-          <a href={PHOTO_PAGE} target="_blank" rel="noopener noreferrer" className={lightLink}>
-            Photo: Daniel Case
-          </a>
-          ,{" "}
-          <a href={PHOTO_LICENCE} target="_blank" rel="noopener noreferrer" className={lightLink}>
-            CC BY-SA 4.0
-          </a>
-          ; cropped, toned and compressed.
         </p>
       </div>
     </section>

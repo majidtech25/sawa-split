@@ -17,16 +17,11 @@ export default function SiteFooter() {
             Live demo
           </a>
         </div>
-        <p className="text-xs">
-          Photo by{" "}
-          <a href="https://unsplash.com/@spliff_dj_joe" target="_blank" rel="noopener noreferrer" className={footerLink}>
-            Dwayne joe
-          </a>{" "}
-          on{" "}
-          <a href="https://unsplash.com/photos/dnhm5nzXGl4" target="_blank" rel="noopener noreferrer" className={footerLink}>
-            Unsplash
+        {/* Required by the licence of the problem section's photo (CC BY-SA 4.0): keep it. */}
+        <p className="text-xs text-white/75">
+          <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className={`${footerLink} !text-white/75`}>
+            Photo: Daniel Case, CC BY-SA 4.0
           </a>
-          , Nairobi, Kenya.
         </p>
       </div>
     </footer>
