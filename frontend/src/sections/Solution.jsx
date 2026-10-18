@@ -22,7 +22,7 @@ const steps = [
 
 export default function Solution() {
   return (
-    <section id="how-it-works" className="scroll-mt-4 px-6 py-16 md:py-20">
+    <section id="how-it-works" className="scroll-mt-16 px-6 py-16 md:py-20">
       <div className="mx-auto max-w-5xl">
         <h2 className="text-center text-xl font-semibold text-sawa-text">How it works</h2>
         <ol className="mt-10 grid gap-8 md:grid-cols-3">

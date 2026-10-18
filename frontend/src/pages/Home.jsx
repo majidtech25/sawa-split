@@ -11,10 +11,12 @@ import Contact from "../sections/Contact"
 import SiteFooter from "../sections/SiteFooter"
 
 export default function Home() {
-  // The demo's "contact us" lands here and scrolls to the section (HashRouter: no #anchors).
+  // The header's section links, the demo's "contact us" and the login page's link land
+  // here with the section to show (HashRouter: no #anchors). Each section's scroll margin
+  // clears the sticky header.
   const { state } = useLocation()
   useEffect(() => {
-    if (state?.scrollTo) document.getElementById(state.scrollTo)?.scrollIntoView({ block: "start" })
+    if (state?.scrollTo) document.getElementById(state.scrollTo)?.scrollIntoView({ block: "start", behavior: "smooth" })
   }, [state])
   return (
     <div className="min-h-screen bg-sawa-bg text-sawa-text">

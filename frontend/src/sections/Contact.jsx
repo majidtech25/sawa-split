@@ -41,7 +41,7 @@ function Copyable({ icon: Icon, label, value, copyLabel }) {
 
 export default function Contact() {
   return (
-    <section id="contact" className="scroll-mt-4 border-t border-sawa-border bg-sawa-surface px-6 py-16 md:py-20">
+    <section id="contact" className="scroll-mt-16 border-t border-sawa-border bg-sawa-surface px-6 py-16 md:py-20">
       <div className="mx-auto max-w-2xl">
         <h2 className="text-center text-xl font-semibold text-sawa-text">Bring Sawa Split to your market</h2>
         <p className="mt-3 text-center text-[15px] text-sawa-text-muted">

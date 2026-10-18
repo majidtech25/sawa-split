@@ -97,7 +97,7 @@ export default function DemoPage() {
 
   return (
     <div style={BRAND_BACKGROUND} className="min-h-screen">
-      <div role="note" className="sticky top-0 z-10 bg-sawa-text px-4 py-2 text-center text-sm font-semibold text-white">
+      <div role="note" className="sticky top-[57px] z-10 bg-sawa-text px-4 py-2 text-center text-sm font-semibold text-white">
         Demo — no real payment is made
       </div>
       <div className="mx-auto max-w-[1000px] px-4 py-6 lg:px-8 lg:py-12">

@@ -17,7 +17,7 @@ const lightLink = "text-white underline underline-offset-2 hover:no-underline"
 
 export default function Problem() {
   return (
-    <section className="relative isolate overflow-hidden bg-[#1B2A41] px-6 py-16 md:py-20">
+    <section id="problem" className="relative isolate scroll-mt-16 overflow-hidden bg-[#1B2A41] px-6 py-16 md:py-20">
       <img src={talekRiver} alt="" className="absolute inset-0 -z-10 h-full w-full object-cover" />
       {/* Dark navy over the photo, so white text stays well above 4.5:1 on every part of it. */}
       <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[#1B2A41]/80" />

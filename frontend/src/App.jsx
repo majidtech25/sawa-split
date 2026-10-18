@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { HashRouter, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import Home from "./pages/Home"
 import LoginPage from "./pages/LoginPage"
@@ -13,18 +13,12 @@ import AccountsPage from "./pages/AccountsPage"
 import CoordinatorPage from "./pages/CoordinatorPage"
 import PriceCardsPage from "./pages/PriceCardsPage"
 import RegisterPage from "./pages/RegisterPage"
-import { ShieldCheck } from "lucide-react"
+import { Menu, ShieldCheck, X } from "lucide-react"
 import Brand from "./components/Brand"
 import { currentProfile, endSession, forgetProfile, supabase } from "./lib/supabase"
 
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
-
-const HEADER_WIDTHS = {
-  card: "max-w-[420px] px-4",
-  wide: "max-w-[420px] px-4 md:max-w-6xl md:px-8",
-  page: "max-w-6xl px-6", // the homepage's own full-width layout
-}
 
 const ROLE_HOME = {
   coordinator: { to: "/coordinator", label: "Reconciliation" },
@@ -60,24 +54,112 @@ function useSession() {
 // Signed in: the role's home link (or the coordinator's nav) and "Log out". Signed
 // out: "Log in". There's no sign-up link: accounts are created by a coordinator.
 // Tourist pages show neither, just "Verified checkout" (MUST 18d).
-function AppHeader({ width = "card", nav = null, tourist = false }) {
+// The homepage sections the header links to (SCOPE: navbar polish, 2026-10-18).
+const SECTIONS = [
+  { id: "problem", label: "Problem" },
+  { id: "how-it-works", label: "How it works" },
+  { id: "who-its-for", label: "Who it's for" },
+  { id: "roadmap", label: "Roadmap" },
+  { id: "contact", label: "Contact" },
+]
+
+// The homepage section on screen, for highlighting its link. Only on the homepage.
+function useCurrentSection(active) {
+  const [current, setCurrent] = useState(null)
+  useEffect(() => {
+    if (!active) return undefined
+    const pick = () => {
+      // The last section whose top has passed just below the header.
+      let found = null
+      for (const { id } of SECTIONS) {
+        const el = document.getElementById(id)
+        if (el && el.getBoundingClientRect().top <= 120) found = id
+      }
+      setCurrent(found)
+    }
+    pick()
+    window.addEventListener("scroll", pick, { passive: true })
+    return () => window.removeEventListener("scroll", pick)
+  }, [active])
+  return active ? current : null
+}
+
+// Signed in: the role's home link (or the coordinator's nav) and "Log out". Signed
+// out: "Log in". There's no sign-up link: accounts are created by a coordinator.
+// Members and visitors also get the homepage section links: in the middle on wide
+// screens, in a "Menu" on phones. Tourist pages show only the logo and "Verified
+// checkout" (MUST 18d); coordinator pages keep their own nav.
+function AppHeader({ nav = null, tourist = false }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { checked, profile } = useSession()
   const home = profile && ROLE_HOME[profile.role]
+  const sections = !tourist && !nav
+  const current = useCurrentSection(sections && pathname === "/")
+  const [menuOpen, setMenuOpen] = useState(false)
+  const headerRef = useRef(null)
+  const taps = useRef(0) // makes each tap a new navigation, so the same link scrolls again
+
+  // The menu closes on Esc and on a tap anywhere outside the header.
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const onKey = (e) => e.key === "Escape" && setMenuOpen(false)
+    const onPointer = (e) => headerRef.current && !headerRef.current.contains(e.target) && setMenuOpen(false)
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("pointerdown", onPointer)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("pointerdown", onPointer)
+    }
+  }, [menuOpen])
+
+  function goTo(id) {
+    setMenuOpen(false)
+    // To the homepage (if not there), which scrolls to the section (pages/Home.jsx).
+    taps.current += 1
+    navigate("/", { state: { scrollTo: id, tap: taps.current } })
+  }
   async function logOut() {
     await endSession()
     navigate("/login", { replace: true })
   }
+
+  const sectionLink = (id) =>
+    `inline-flex min-h-11 items-center whitespace-nowrap ${focusRing} ${
+      current === id ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"
+    }`
+
   return (
-    <header className="border-b border-sawa-border bg-sawa-surface">
-      {/* On phones a nav drops to its own row so the brand and "Log out" never wrap. */}
-      <div className={`mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 py-1.5 ${HEADER_WIDTHS[width]}`}>
-        <Link to="/" className={`inline-flex min-h-11 items-center text-base ${focusRing}`}>
+    <header ref={headerRef} className={`${tourist ? "" : "sticky top-0 z-30"} border-b border-sawa-border bg-sawa-surface`}>
+      <div className="mx-auto flex max-w-[1200px] items-center gap-4 px-4 py-1.5 lg:px-8">
+        <Link to="/" className={`inline-flex min-h-11 shrink-0 items-center text-base ${focusRing}`}>
           <Brand />
         </Link>
-        {nav && <div className="order-last w-full text-sm md:order-none md:ml-auto md:w-auto">{nav}</div>}
-        <div className={`ml-auto flex items-center gap-4 text-sm ${nav ? "md:ml-0" : ""}`}>
+
+        {sections && (
+          <nav aria-label="Sections" className="hidden flex-1 justify-center gap-6 text-sm lg:flex">
+            {SECTIONS.map(({ id, label }) => (
+              <button key={id} type="button" onClick={() => goTo(id)} className={sectionLink(id)} aria-current={current === id ? "true" : undefined}>
+                {label}
+              </button>
+            ))}
+          </nav>
+        )}
+        {nav && <div className="hidden text-sm md:ml-auto md:block">{nav}</div>}
+
+        <div className={`ml-auto flex shrink-0 items-center gap-4 text-sm ${sections ? "lg:ml-0" : ""} ${nav ? "md:ml-0" : ""}`}>
+          {sections && (
+            <button
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              aria-expanded={menuOpen}
+              aria-controls="site-menu"
+              className={`inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap text-sawa-text lg:hidden ${focusRing}`}
+            >
+              {menuOpen ? <X aria-hidden="true" className="size-5" /> : <Menu aria-hidden="true" className="size-5" />}
+              Menu
+            </button>
+          )}
           {tourist ? (
             <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sawa-green">
               <ShieldCheck aria-hidden="true" className="size-4" /> Verified checkout
@@ -105,6 +187,23 @@ function AppHeader({ width = "card", nav = null, tourist = false }) {
           )}
         </div>
       </div>
+
+      {/* Coordinator pages on phones: their nav on its own row, as before. */}
+      {nav && <div className="mx-auto max-w-[1200px] px-4 pb-2 text-sm md:hidden">{nav}</div>}
+
+      {sections && menuOpen && (
+        <nav id="site-menu" aria-label="Sections" className="border-t border-sawa-border bg-sawa-surface lg:hidden">
+          <ul className="mx-auto flex max-w-[1200px] flex-col px-4 py-2">
+            {SECTIONS.map(({ id, label }) => (
+              <li key={id}>
+                <button type="button" onClick={() => goTo(id)} className={`w-full text-left text-[15px] ${sectionLink(id)}`}>
+                  {label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
     </header>
   )
 }
@@ -149,7 +248,7 @@ function TouristScreen({ children }) {
 function CoordinatorScreen({ children }) {
   return (
     <RequireRole roles={["coordinator"]}>
-      <AppHeader width="wide" nav={<CoordinatorNav />} />
+      <AppHeader nav={<CoordinatorNav />} />
       {children}
     </RequireRole>
   )
@@ -169,7 +268,7 @@ export default function App() {
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<><AppHeader width="page" /><Home /></>} />
+        <Route path="/" element={<><AppHeader /><Home /></>} />
         <Route path="/pay/:producerId" element={<TouristScreen><PriceCardPage /></TouristScreen>} />
         <Route path="/pay/:producerId/checkout" element={<TouristScreen><CheckoutPage /></TouristScreen>} />
         <Route path="/driver/:code" element={<TouristScreen><DriverPage /></TouristScreen>} />

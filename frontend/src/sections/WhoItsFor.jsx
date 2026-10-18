@@ -30,7 +30,7 @@ const personas = [
 
 export default function WhoItsFor() {
   return (
-    <section className="relative isolate overflow-hidden bg-sawa-green px-6 py-16 md:py-20">
+    <section id="who-its-for" className="relative isolate scroll-mt-16 overflow-hidden bg-sawa-green px-6 py-16 md:py-20">
       <img
         src={whoItsForPhoto}
         alt="Two craftspeople working on a textile piece, Nairobi, Kenya"

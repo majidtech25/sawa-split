@@ -26,7 +26,7 @@ const horizons = [
 
 export default function Roadmap() {
   return (
-    <section className="border-t border-sawa-border px-6 py-16 md:py-20">
+    <section id="roadmap" className="scroll-mt-16 border-t border-sawa-border px-6 py-16 md:py-20">
       <div className="mx-auto max-w-4xl">
         <h2 className="text-center text-xl font-semibold text-sawa-text">
           Roadmap
