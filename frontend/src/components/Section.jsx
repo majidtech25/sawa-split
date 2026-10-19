@@ -12,7 +12,7 @@ export function SectionHeading({ eyebrow, title, onDark = false, className = "" 
   return (
     <div className={className}>
       {eyebrow && (
-        <p className={`text-sm font-semibold uppercase tracking-wide ${onDark ? "text-white/85" : "text-sawa-green"}`}>{eyebrow}</p>
+        <p className={`text-sm font-semibold uppercase tracking-wide ${onDark ? "text-white" : "text-sawa-green"}`}>{eyebrow}</p>
       )}
       <h2 className={`mt-2 text-2xl font-semibold leading-tight md:text-3xl ${onDark ? "text-white" : "text-sawa-text"}`}>{title}</h2>
     </div>
