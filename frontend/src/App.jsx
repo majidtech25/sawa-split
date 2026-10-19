@@ -15,6 +15,7 @@ import PriceCardsPage from "./pages/PriceCardsPage"
 import RegisterPage from "./pages/RegisterPage"
 import { Menu, ShieldCheck, X } from "lucide-react"
 import Brand from "./components/Brand"
+import CoordinatorShell from "./components/CoordinatorShell"
 import { currentProfile, endSession, forgetProfile, supabase } from "./lib/supabase"
 
 const focusRing =
@@ -51,9 +52,6 @@ function useSession() {
   return state
 }
 
-// Signed in: the role's home link (or the coordinator's nav) and "Log out". Signed
-// out: "Log in". There's no sign-up link: accounts are created by a coordinator.
-// Tourist pages show neither, just "Verified checkout" (MUST 18d).
 // The homepage sections the header links to (SCOPE: navbar polish, 2026-10-18).
 const SECTIONS = [
   { id: "problem", label: "Problem" },
@@ -84,18 +82,19 @@ function useCurrentSection(active) {
   return active ? current : null
 }
 
-// Signed in: the role's home link (or the coordinator's nav) and "Log out". Signed
+// Signed in: the role's home link and "Log out". Signed
 // out: "Log in". There's no sign-up link: accounts are created by a coordinator.
 // On the homepage it also has the section links: in the middle on wide screens, in a
 // "Menu" on phones. Every other page has just the logo and auth. Tourist pages show
-// only the logo and "Verified checkout" (MUST 18d); coordinator pages keep their own nav.
-function AppHeader({ nav = null, tourist = false }) {
+// only the logo and "Verified checkout" (MUST 18d); coordinator pages have their own
+// sidebar instead (components/CoordinatorShell.jsx).
+function AppHeader({ tourist = false }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { checked, profile } = useSession()
   const home = profile && ROLE_HOME[profile.role]
   // Section links (and the phone Menu) only on the homepage; elsewhere just the logo and auth.
-  const sections = !tourist && !nav && pathname === "/"
+  const sections = !tourist && pathname === "/"
   const current = useCurrentSection(sections)
   const [menuOpen, setMenuOpen] = useState(false)
   const headerRef = useRef(null)
@@ -150,9 +149,8 @@ function AppHeader({ nav = null, tourist = false }) {
             ))}
           </nav>
         )}
-        {nav && <div className="hidden text-sm md:ml-auto md:block">{nav}</div>}
 
-        <div className={`ml-auto flex shrink-0 items-center gap-4 text-sm ${sections ? "lg:ml-0" : ""} ${nav ? "md:ml-0" : ""}`}>
+        <div className={`ml-auto flex shrink-0 items-center gap-4 text-sm ${sections ? "lg:ml-0" : ""}`}>
           {sections && (
             <button
               type="button"
@@ -171,7 +169,7 @@ function AppHeader({ nav = null, tourist = false }) {
             </span>
           ) : !checked ? null : profile ? (
             <>
-              {home && !nav && (
+              {home && (
                 <>
                   <NavLink to={home.to} end className={navLink}>
                     {home.label}
@@ -193,8 +191,6 @@ function AppHeader({ nav = null, tourist = false }) {
         </div>
       </div>
 
-      {/* Coordinator pages on phones: their nav on its own row, as before. */}
-      {nav && <div className="mx-auto max-w-[1200px] px-4 pb-2 text-sm md:hidden">{nav}</div>}
 
       {sections && menuOpen && (
         <nav id="site-menu" aria-label="Sections" className="border-t border-sawa-border bg-sawa-surface lg:hidden">
@@ -210,25 +206,6 @@ function AppHeader({ nav = null, tourist = false }) {
         </nav>
       )}
     </header>
-  )
-}
-
-function CoordinatorNav() {
-  return (
-    <nav aria-label="Coordinator" className="flex flex-wrap gap-x-4 gap-y-1">
-      <NavLink to="/coordinator" end className={navLink}>
-        Reconciliation
-      </NavLink>
-      <NavLink to="/coordinator/register" className={navLink}>
-        Register
-      </NavLink>
-      <NavLink to="/coordinator/price-cards" className={navLink}>
-        Price cards
-      </NavLink>
-      <NavLink to="/coordinator/accounts" className={navLink}>
-        Accounts
-      </NavLink>
-    </nav>
   )
 }
 
@@ -253,8 +230,7 @@ function TouristScreen({ children }) {
 function CoordinatorScreen({ children }) {
   return (
     <RequireRole roles={["coordinator"]}>
-      <AppHeader nav={<CoordinatorNav />} />
-      {children}
+      <CoordinatorShell>{children}</CoordinatorShell>
     </RequireRole>
   )
 }
