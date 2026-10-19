@@ -125,9 +125,13 @@ function AppHeader({ nav = null, tourist = false }) {
     navigate("/login", { replace: true })
   }
 
+  // Hover and keyboard focus: green with a green underline, eased in; the section on
+  // screen keeps that look, in bold.
   const sectionLink = (id) =>
-    `inline-flex min-h-11 items-center whitespace-nowrap ${focusRing} ${
-      current === id ? "font-semibold text-sawa-text" : "text-sawa-green hover:underline"
+    `inline-flex min-h-11 items-center whitespace-nowrap decoration-2 underline-offset-8 transition-colors duration-150 ${focusRing} ${
+      current === id
+        ? "font-semibold text-sawa-green underline"
+        : "text-sawa-text hover:text-sawa-green hover:underline focus-visible:text-sawa-green focus-visible:underline"
     }`
 
   return (

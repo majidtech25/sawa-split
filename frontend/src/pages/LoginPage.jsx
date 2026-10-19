@@ -52,42 +52,45 @@ export default function LoginPage() {
 
   return (
     <Screen className="flex min-h-[70vh] flex-col justify-center">
-      <h1 className="text-2xl font-semibold">Log in</h1>
-      <p className="mt-1 text-[15px] text-sawa-text-muted">With the phone number and PIN from your coordinator.</p>
-      <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
-        <Field
-          id="login-phone"
-          label="Phone number"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          placeholder="07XX XXX XXX"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-        />
-        <Field
-          id="login-pin"
-          label="PIN"
-          type="password"
-          inputMode="numeric"
-          // Off: makers share phones, and a saved PIN would fill in for the wrong account.
-          autoComplete="off"
-          maxLength={4}
-          placeholder="••••"
-          value={pin}
-          onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-        />
-        <SecondaryButton type="submit" disabled={busy} className="mt-2 w-full">
-          {busy ? "Logging in…" : "Log in"}
-        </SecondaryButton>
-        <ErrorNote>{error}</ErrorNote>
-        {rejected && (
-          <div className="-mt-2">
-            <ContactLink />
-          </div>
-        )}
-      </form>
-      <div className="mt-8 border-t border-sawa-border pt-5 text-center">
+      {/* A white card with a green border; the inputs turn green on focus (components/ui Field). */}
+      <div className="rounded-sawa border-2 border-sawa-green bg-sawa-surface p-6">
+        <h1 className="text-2xl font-semibold">Log in</h1>
+        <p className="mt-1 text-[15px] text-sawa-text-muted">With the phone number and PIN from your coordinator.</p>
+        <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
+          <Field
+            id="login-phone"
+            label="Phone number"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="07XX XXX XXX"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+          <Field
+            id="login-pin"
+            label="PIN"
+            type="password"
+            inputMode="numeric"
+            // Off: makers share phones, and a saved PIN would fill in for the wrong account.
+            autoComplete="off"
+            maxLength={4}
+            placeholder="••••"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+          />
+          <SecondaryButton type="submit" disabled={busy} className="mt-2 w-full">
+            {busy ? "Logging in…" : "Log in"}
+          </SecondaryButton>
+          <ErrorNote>{error}</ErrorNote>
+          {rejected && (
+            <div className="-mt-2">
+              <ContactLink />
+            </div>
+          )}
+        </form>
+      </div>
+      <div className="mt-5 rounded-sawa border border-sawa-green bg-sawa-surface p-5 text-center">
         <p className="text-[13px] text-sawa-text-muted">
           Not registered yet? Makers, guides and drivers are registered in person by a site coordinator.
         </p>

@@ -1,4 +1,5 @@
 import { CircleSlash, FileLock2, ScrollText, UserCheck } from "lucide-react"
+import Section, { SectionHeading } from "../components/Section"
 
 // Each line is something the system enforces, not a promise (CLAUDE.md sections 4-5).
 const reasons = [
@@ -26,10 +27,10 @@ const reasons = [
 
 export default function Trust() {
   return (
-    <section className="px-6 py-16 md:py-20">
-      <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-xl font-semibold text-sawa-text">Why it can be trusted</h2>
-        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+    <Section>
+      <div className="grid gap-10 lg:grid-cols-[4fr_8fr] lg:gap-16">
+        <SectionHeading eyebrow="Trust" title="Why it can be trusted" />
+        <div className="grid gap-4 sm:grid-cols-2">
           {reasons.map(({ icon: Icon, name, blurb }) => (
             <div key={name} className="rounded-sawa border border-sawa-border bg-sawa-surface p-5">
               <h3 className="flex items-center gap-2.5 text-sm font-semibold text-sawa-text">
@@ -41,6 +42,6 @@ export default function Trust() {
           ))}
         </div>
       </div>
-    </section>
+    </Section>
   )
 }

@@ -1,4 +1,5 @@
 import talekRiver from "../assets/talek-river.webp"
+import Section from "../components/Section"
 
 // The boma figures: "A Scandal in Maasailand that Cheats both Communities and Tourists",
 // Prescott College students, Maasai Cultural Preservation Project, June 2005. Early 1990s:
@@ -15,28 +16,32 @@ const lightLink = "text-white underline underline-offset-2 hover:no-underline"
 
 export default function Problem() {
   return (
-    <section id="problem" className="relative isolate scroll-mt-16 overflow-hidden bg-[#1B2A41] px-6 py-16 md:py-20">
+    <Section id="problem" className="relative isolate overflow-hidden bg-[#1B2A41]">
       <img src={talekRiver} alt="" className="absolute inset-0 -z-10 h-full w-full object-cover" />
       {/* Dark navy over the photo, so white text stays well above 4.5:1 on every part of it. */}
       <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[#1B2A41]/80" />
-      <div className="mx-auto max-w-3xl text-center">
-        <p className="font-mono text-[1.75rem] font-bold leading-tight tabular-nums text-white sm:text-4xl md:text-6xl">
-          KSh 300 of every $20 paid at the gate
-        </p>
-        <p className="mx-auto mt-6 max-w-2xl text-base text-white/90">
-          In 2005, a Maasai village kept about KSh 300 (US$3.50) of the $20 each
-          tourist paid at the boma gate, less than a fifth. In the early 1990s it
-          kept about half. The rest went to a commission chain the tourist never
-          saw. Sawa Split makes that chain visible.
-        </p>
-        <p className="mt-4 text-xs text-white/85">
-          Source:{" "}
-          <a href={SOURCE} target="_blank" rel="noopener noreferrer" className={lightLink}>
-            "A Scandal in Maasailand that Cheats both Communities and Tourists"
-          </a>
-          , Prescott College students, Maasai Cultural Preservation Project, June 2005 (PDF).
-        </p>
+      <div className="grid gap-8 lg:grid-cols-2 lg:items-center lg:gap-16">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-white/85">The problem</p>
+          <p className="mt-3 font-mono text-[1.75rem] font-bold leading-tight tabular-nums text-white sm:text-4xl md:text-5xl">
+            KSh 300 of every $20 paid at the gate
+          </p>
+        </div>
+        <div>
+          <p className="text-base text-white/90 md:text-lg">
+            In 2005, a Maasai village kept about KSh 300 (US$3.50) of the $20 each tourist paid at the boma gate, less than
+            a fifth. In the early 1990s it kept about half. The rest went to a commission chain the tourist never saw. Sawa
+            Split makes that chain visible.
+          </p>
+          <p className="mt-4 text-xs text-white/85">
+            Source:{" "}
+            <a href={SOURCE} target="_blank" rel="noopener noreferrer" className={lightLink}>
+              "A Scandal in Maasailand that Cheats both Communities and Tourists"
+            </a>
+            , Prescott College students, Maasai Cultural Preservation Project, June 2005 (PDF).
+          </p>
+        </div>
       </div>
-    </section>
+    </Section>
   )
 }

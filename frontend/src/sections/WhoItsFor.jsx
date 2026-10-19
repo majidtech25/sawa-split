@@ -1,5 +1,6 @@
 import { ClipboardCheck, Compass, Hand, Smartphone } from "lucide-react"
 import whoItsForPhoto from "../assets/who-its-for.jpg"
+import Section, { SectionHeading } from "../components/Section"
 
 const personas = [
   {
@@ -30,34 +31,27 @@ const personas = [
 
 export default function WhoItsFor() {
   return (
-    <section id="who-its-for" className="relative isolate scroll-mt-16 overflow-hidden bg-sawa-green px-6 py-16 md:py-20">
+    <Section id="who-its-for" className="relative isolate overflow-hidden bg-sawa-green">
       <img
         src={whoItsForPhoto}
         alt="Two craftspeople working on a textile piece, Nairobi, Kenya"
-        className="absolute inset-0 h-full w-full object-cover opacity-45 mix-blend-luminosity"
+        className="absolute inset-0 -z-10 h-full w-full object-cover opacity-45 mix-blend-luminosity"
       />
-      <div className="absolute inset-0 bg-sawa-green/55" />
-      <div className="relative mx-auto max-w-5xl">
-        <h2 className="text-center text-xl font-semibold text-white">
-          Who it's for
-        </h2>
-        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-sawa-green/55" />
+      <div className="grid gap-10 lg:grid-cols-[4fr_8fr] lg:gap-16">
+        <SectionHeading eyebrow="Who it's for" title="Four people, one fair split" onDark />
+        <div className="grid gap-4 sm:grid-cols-2">
           {personas.map(({ icon: Icon, ...persona }) => (
-            <div
-              key={persona.name}
-              className="rounded-sawa border border-sawa-border bg-sawa-surface p-5"
-            >
+            <div key={persona.name} className="rounded-sawa border border-sawa-border bg-sawa-surface p-5">
               <h3 className="flex items-center gap-2.5 text-sm font-semibold text-sawa-text">
                 <Icon size={20} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-sawa-green" />
                 {persona.name}
               </h3>
-              <p className="mt-2 text-sm text-sawa-text-muted">
-                {persona.blurb}
-              </p>
+              <p className="mt-2 text-sm text-sawa-text-muted">{persona.blurb}</p>
             </div>
           ))}
         </div>
       </div>
-    </section>
+    </Section>
   )
 }

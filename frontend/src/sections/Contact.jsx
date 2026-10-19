@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Copy, Mail, MapPin, MessageCircle } from "lucide-react"
 import { LinkButton } from "../components/Button"
+import Section, { SectionHeading } from "../components/Section"
 
 const EMAIL = "abdulshide87@gmail.com"
 const WHATSAPP = "+254 740 957 721"
@@ -39,40 +40,49 @@ function Copyable({ icon: Icon, label, value, copyLabel }) {
   )
 }
 
+// The office card's "map" is drawn with CSS only (a street-grid pattern and a pin): purely
+// decorative, with no map service, tiles or any other third-party request.
+const STREET_GRID = {
+  backgroundColor: "#F3EEE2",
+  backgroundImage:
+    "linear-gradient(90deg, rgba(30,91,58,0.10) 1px, transparent 1px), linear-gradient(0deg, rgba(30,91,58,0.10) 1px, transparent 1px), linear-gradient(35deg, transparent 47%, rgba(185,122,34,0.28) 47%, rgba(185,122,34,0.28) 53%, transparent 53%)",
+  backgroundSize: "28px 28px, 28px 28px, 100% 100%",
+}
+
 export default function Contact() {
   return (
-    <section id="contact" className="scroll-mt-16 border-t border-sawa-border bg-sawa-surface px-6 py-16 md:py-20">
-      <div className="mx-auto max-w-2xl">
-        <h2 className="text-center text-xl font-semibold text-sawa-text">Bring Sawa Split to your market</h2>
-        <p className="mt-3 text-center text-[15px] text-sawa-text-muted">
-          For cooperatives, site coordinators and tourism offices. We'll set up your makers and guides in person, print
-          their stall and guide QR codes, and run a pilot with you.
-        </p>
-        <div className="mt-8 flex flex-col gap-3">
-          <Copyable icon={Mail} label="Email" value={EMAIL} copyLabel="Copy email" />
-          <Copyable icon={MessageCircle} label="WhatsApp" value={WHATSAPP} copyLabel="Copy number" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-sm text-sawa-text-muted">
-              <MapPin size={18} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-sawa-green" />
-              Or visit: Oasis Innovation Hub offices, Garissa University
-            </p>
-            <LinkButton href={WHATSAPP_LINK} external>
-              <MessageCircle size={16} strokeWidth={1.75} aria-hidden="true" /> Chat on WhatsApp
-            </LinkButton>
+    <Section id="contact" className="border-t border-sawa-border bg-sawa-surface">
+      <div className="grid gap-10 lg:grid-cols-2 lg:items-start lg:gap-16">
+        <div>
+          <SectionHeading eyebrow="Contact" title="Bring Sawa Split to your market" />
+          <p className="mt-3 max-w-xl text-[15px] text-sawa-text-muted">
+            For cooperatives, site coordinators and tourism offices. We'll set up your makers and guides in person, print
+            their stall and guide QR codes, and run a pilot with you.
+          </p>
+          <div className="mt-8 flex max-w-xl flex-col gap-3">
+            <Copyable icon={Mail} label="Email" value={EMAIL} copyLabel="Copy email" />
+            <Copyable icon={MessageCircle} label="WhatsApp" value={WHATSAPP} copyLabel="Copy number" />
+            <div>
+              <LinkButton href={WHATSAPP_LINK} external>
+                <MessageCircle size={16} strokeWidth={1.75} aria-hidden="true" /> Chat on WhatsApp
+              </LinkButton>
+            </div>
           </div>
         </div>
 
-        {/* Quoted with the speaker's approval; wording exactly as approved. */}
-        <figure className="mt-10 rounded-sawa border-l-4 border-sawa-green bg-sawa-bg px-5 py-5">
-          <blockquote className="text-lg font-semibold leading-snug text-sawa-text">
-            "Innovation is not about where you come from. It's about the problems you refuse to ignore."
-          </blockquote>
-          <figcaption className="mt-3 text-sm text-sawa-text-muted">— Abdiaziz Haredh, Chairman, Oasis Innovation Hub</figcaption>
-        </figure>
-        <p className="mt-4 text-center text-sm text-sawa-text-muted">
-          With thanks to Oasis Innovation Hub for championing young innovators at Garissa University.
-        </p>
+        <div className="overflow-hidden rounded-sawa border border-sawa-border bg-sawa-surface">
+          <div aria-hidden="true" className="relative h-48" style={STREET_GRID}>
+            <MapPin size={36} strokeWidth={1.75} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full fill-white text-sawa-green" />
+          </div>
+          <div className="flex items-start gap-3 p-5">
+            <MapPin size={20} strokeWidth={1.75} aria-hidden="true" className="mt-0.5 shrink-0 text-sawa-green" />
+            <div>
+              <h3 className="text-sm font-semibold text-sawa-text">Visit us</h3>
+              <p className="mt-1 text-sm text-sawa-text-muted">Oasis Innovation Hub offices, Garissa University</p>
+            </div>
+          </div>
+        </div>
       </div>
-    </section>
+    </Section>
   )
 }
