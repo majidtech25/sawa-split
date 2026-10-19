@@ -1,4 +1,5 @@
 import { LinkButton, ScrollButton } from "../components/Button"
+import { PAGE_WIDTH } from "../components/Section"
 import hero1717 from "../assets/hero-1717.webp"
 import hero960 from "../assets/hero-960.webp"
 
@@ -52,8 +53,8 @@ export default function Hero() {
         style={{ background: "linear-gradient(180deg, rgba(27,42,65,0.9) 0%, rgba(27,42,65,0.6) 45%, rgba(27,42,65,0) 100%)" }}
       />
 
-      <div className="mx-auto w-full max-w-[1200px] px-6 pb-10 pt-10 max-[380px]:pt-6 lg:px-8 lg:py-24">
-        <div className="max-w-xl lg:w-[46%]">
+      <div className={`${PAGE_WIDTH} pb-10 pt-10 max-[380px]:pt-6 lg:py-24`}>
+        <div className="max-w-xl lg:w-[46%] lg:max-w-[620px]">
           <p className="text-sm font-semibold uppercase tracking-wide text-white/85">Fair pay for Kenya's makers and guides</p>
           <h1 className="mt-3 text-[2rem] font-semibold leading-tight text-white max-[380px]:text-[1.75rem] sm:text-4xl md:text-5xl">Every shilling has an address.</h1>
           <p className="mt-5 text-base text-white/90 max-[380px]:mt-4 max-[380px]:text-[15px] md:text-lg">

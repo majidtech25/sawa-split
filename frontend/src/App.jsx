@@ -84,8 +84,8 @@ function useCurrentSection(active) {
 
 // Signed in: the role's home link and "Log out". Signed
 // out: "Log in". There's no sign-up link: accounts are created by a coordinator.
-// On the homepage it also has the section links: in the middle on wide screens, in a
-// "Menu" on phones. Every other page has just the logo and auth. Tourist pages show
+// Full width: the logo far left; the section links and Log in (or Dashboard · Log out)
+// grouped far right. On the homepage the section links fold into a "Menu" on phones. Every other page has just the logo and auth. Tourist pages show
 // only the logo and "Verified checkout" (MUST 18d); coordinator pages have their own
 // sidebar instead (components/CoordinatorShell.jsx).
 function AppHeader({ tourist = false }) {
@@ -135,13 +135,13 @@ function AppHeader({ tourist = false }) {
 
   return (
     <header ref={headerRef} className={`${tourist ? "" : "sticky top-0 z-30"} border-b border-sawa-border bg-sawa-surface`}>
-      <div className="mx-auto flex max-w-[1200px] items-center gap-4 px-4 py-1.5 lg:px-8">
+      <div className="flex items-center gap-4 px-6 py-1.5 lg:px-12">
         <Link to="/" className={`inline-flex min-h-11 shrink-0 items-center text-base ${focusRing}`}>
           <Brand />
         </Link>
 
         {sections && (
-          <nav aria-label="Sections" className="hidden flex-1 justify-center gap-6 text-sm lg:flex">
+          <nav aria-label="Sections" className="ml-auto hidden gap-6 text-sm lg:flex">
             {SECTIONS.map(({ id, label }) => (
               <button key={id} type="button" onClick={() => goTo(id)} className={sectionLink(id)} aria-current={current === id ? "true" : undefined}>
                 {label}
@@ -150,7 +150,7 @@ function AppHeader({ tourist = false }) {
           </nav>
         )}
 
-        <div className={`ml-auto flex shrink-0 items-center gap-4 text-sm ${sections ? "lg:ml-0" : ""}`}>
+        <div className={`ml-auto flex shrink-0 items-center gap-4 text-sm ${sections ? "lg:ml-4" : ""}`}>
           {sections && (
             <button
               type="button"
@@ -183,7 +183,10 @@ function AppHeader({ tourist = false }) {
             </>
           ) : (
             pathname !== "/login" && (
-              <Link to="/login" className={`inline-flex min-h-11 items-center whitespace-nowrap text-sawa-green hover:underline ${focusRing}`}>
+              <Link
+                to="/login"
+                className={`inline-flex min-h-11 items-center whitespace-nowrap rounded-sawa bg-sawa-green px-4 font-semibold text-white transition-colors duration-150 hover:bg-[#164a2f] ${focusRing}`}
+              >
                 Log in
               </Link>
             )
@@ -194,7 +197,7 @@ function AppHeader({ tourist = false }) {
 
       {sections && menuOpen && (
         <nav id="site-menu" aria-label="Sections" className="border-t border-sawa-border bg-sawa-surface lg:hidden">
-          <ul className="mx-auto flex max-w-[1200px] flex-col px-4 py-2">
+          <ul className="flex flex-col px-6 py-2 lg:px-12">
             {SECTIONS.map(({ id, label }) => (
               <li key={id}>
                 <button type="button" onClick={() => goTo(id)} className={`w-full text-left text-[15px] ${sectionLink(id)}`}>

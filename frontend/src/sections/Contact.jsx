@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Copy, Mail, MapPin, MessageCircle } from "lucide-react"
+import { Copy, Map as MapIcon, Mail, MapPin, MessageCircle, Navigation } from "lucide-react"
 import { LinkButton } from "../components/Button"
 import Section, { SectionHeading } from "../components/Section"
 
@@ -40,13 +40,60 @@ function Copyable({ icon: Icon, label, value, copyLabel }) {
   )
 }
 
-// The office card's "map" is drawn with CSS only (a street-grid pattern and a pin): purely
-// decorative, with no map service, tiles or any other third-party request.
+// The office card: a CSS-only street-grid placeholder until the visitor taps "Show map". Only
+// then does Google Maps load (an embed iframe), so nothing from Google reaches a visitor who
+// doesn't ask for the map. "Get directions" is a plain link to Google Maps.
+const MAP_EMBED = "https://www.google.com/maps?q=Garissa+University&output=embed"
+const DIRECTIONS = "https://www.google.com/maps/search/?api=1&query=Garissa+University"
 const STREET_GRID = {
   backgroundColor: "#F3EEE2",
   backgroundImage:
     "linear-gradient(90deg, rgba(30,91,58,0.10) 1px, transparent 1px), linear-gradient(0deg, rgba(30,91,58,0.10) 1px, transparent 1px), linear-gradient(35deg, transparent 47%, rgba(185,122,34,0.28) 47%, rgba(185,122,34,0.28) 53%, transparent 53%)",
   backgroundSize: "28px 28px, 28px 28px, 100% 100%",
+}
+
+function OfficeCard() {
+  const [showMap, setShowMap] = useState(false)
+  return (
+    <div className="overflow-hidden rounded-sawa border border-sawa-border bg-sawa-surface">
+      {showMap ? (
+        <iframe
+          src={MAP_EMBED}
+          title="Map: Garissa University"
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+          className="block h-[300px] w-full border-0"
+        />
+      ) : (
+        <div aria-hidden="true" className="relative h-[300px]" style={STREET_GRID}>
+          <MapPin size={36} strokeWidth={1.75} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full fill-white text-sawa-green" />
+        </div>
+      )}
+      <div className="p-5">
+        <div className="flex items-start gap-3">
+          <MapPin size={20} strokeWidth={1.75} aria-hidden="true" className="mt-0.5 shrink-0 text-sawa-green" />
+          <div>
+            <h3 className="text-sm font-semibold text-sawa-text">Visit us</h3>
+            <p className="mt-1 text-sm text-sawa-text-muted">Oasis Innovation Hub, Garissa University</p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {!showMap && (
+            <button
+              type="button"
+              onClick={() => setShowMap(true)}
+              className="inline-flex min-h-11 items-center gap-2 rounded-sawa border border-sawa-green bg-sawa-green px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#164a2f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+            >
+              <MapIcon size={16} strokeWidth={1.75} aria-hidden="true" /> Show map
+            </button>
+          )}
+          <LinkButton href={DIRECTIONS} external>
+            <Navigation size={16} strokeWidth={1.75} aria-hidden="true" /> Get directions
+          </LinkButton>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function Contact() {
@@ -70,18 +117,7 @@ export default function Contact() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-sawa border border-sawa-border bg-sawa-surface">
-          <div aria-hidden="true" className="relative h-48" style={STREET_GRID}>
-            <MapPin size={36} strokeWidth={1.75} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full fill-white text-sawa-green" />
-          </div>
-          <div className="flex items-start gap-3 p-5">
-            <MapPin size={20} strokeWidth={1.75} aria-hidden="true" className="mt-0.5 shrink-0 text-sawa-green" />
-            <div>
-              <h3 className="text-sm font-semibold text-sawa-text">Visit us</h3>
-              <p className="mt-1 text-sm text-sawa-text-muted">Oasis Innovation Hub offices, Garissa University</p>
-            </div>
-          </div>
-        </div>
+        <OfficeCard />
       </div>
     </Section>
   )
