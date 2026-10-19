@@ -45,13 +45,33 @@ Keyed to the pitch script's own stage directions in Section 3.
 
 ## 3a. v2 sequence: tour pass → stall QR → pay
 
-0. **James's dashboard → Start tour** (see section 2), done before judges sit down. The card shows "0 of N joined".
-1. Tourist phone scans James's referral QR → "James · Driver · Active" → tap **Use James as my guide today**. The join is counted on the server (James's card: "1 of N joined") and the phone keeps it until midnight EAT.
-2. Wanjiru's dashboard → **New sale**: agreed amount (whole KSh, numeric keypad), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for the tourist to pay*.
-3. Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes**. The sale appears with **Guide code JAMES** filled in and "Guide · James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly. ("No, I'm done" removes James and clears the tour pass: Wanjiru gets 100%.)
-4. Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash. For cash, the tourist sees *Waiting for the seller and guide to confirm*. Wanjiru confirms in her sale card ("Cash received? Confirm sale. Your share: KSh X"), and James confirms on his dashboard ("Confirm this sale. You earn KSh Y"). Only then does the tourist's receipt say *Cash payment confirmed*.
-5. Coordinator Tab 2: the sale and the split, plus Referrers (JAMES, Driver: sales and commission) and Tours (James: group size, joined, sales, commission) update.
+Each beat is tagged with the matching step of the `/#/demo` walkthrough (section 3b), so the live run and the walkthrough can be shown side by side.
+
+0. *(demo step 2)* **James's dashboard → Start tour** (see section 2), done before judges sit down. The card shows "0 of N joined".
+1. *(demo step 3)* Tourist phone scans James's referral QR → "James · Driver · Active" → tap **Use James as my guide today**. The join is counted on the server (James's card: "1 of N joined") and the phone keeps it until midnight EAT.
+2. *(demo step 4)* Wanjiru's dashboard → **New sale**: agreed amount (whole KSh, numeric keypad), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for the tourist to pay*.
+3. *(demo step 5)* Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes, still with James**. The sale appears with **Guide code JAMES** filled in and "Guide · James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly. ("No, not with James" removes James and clears the tour pass: Wanjiru gets 100%.)
+4. *(demo steps 6–7)* Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash. For cash, the tourist sees *Waiting for the seller and guide to confirm*. Wanjiru confirms in her sale card ("Cash received? Confirm sale. Your share: KSh X"), and James confirms on his dashboard ("Confirm this sale. You earn KSh Y"). Only then does the tourist's receipt say *Cash payment confirmed*.
+5. *(demo steps 8 and 10)* Coordinator Tab 2: the sale and the split, plus Referrers (JAMES, Driver: sales and commission) and Tours (James: group size, joined, sales, commission) update.
 6. Paying the same sale again, or an expired or cancelled one, is refused with a plain message. A full tour refuses another join ("James's tour is full"), and that tourist pays with no referral.
+
+## 3b. The walkthrough at `/#/demo` (no API, no payment)
+
+A click-through of one sale with sample data, entirely in the browser: it calls no API and stores nothing, so it works without the backend and costs nothing. Every step has its own "What's happening" panel; Back/Next and the step bar move between them. Link a step directly with `/#/demo?step=N` (1–11); add `&guide=no` for the path where the tourist is no longer with James.
+
+| Step | Screen | What it shows |
+|---|---|---|
+| 1 | Coordinator | Registers Wanjiru (maker, 30% guide referral, KSh 10 photo fee) and James (guide) in person, each with a PIN |
+| 2 | James | Starts a tour for a group of 4 |
+| 3 | Tourist | Scans James's QR: tour pass for the day |
+| 4 | Wanjiru | New sale: KSh 700, photo consent on (+KSh 10) |
+| 5 | Tourist | Scans the stall: "Still with James?" Yes / No, then the breakdown |
+| 6 | Tourist | Pays by M-Pesa (simulated); a note on cash and its two confirmations |
+| 7 | Tourist | Receipt |
+| 8 | Wanjiru, James | Split credited: Wanjiru KSh 500, James KSh 210 (No path: Wanjiru KSh 710) |
+| 9 | Wanjiru | Payouts: KSh 500 threshold or the 18:00 sweep; Wanjiru withdraws (simulated) |
+| 10 | Coordinator | Reconciliation: collected = credited, platform fee KSh 0 |
+| 11 | Tourist | Coming next: find a verified guide, one-scan check-in (preview, not built) |
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 
