@@ -1,5 +1,5 @@
 // Checks src/lib/tourPass.js with a stand-in localStorage (SCOPE_V2 MUST 3, 16, 17):
-// a saved pass reads back with its join token, "No, I'm done" (clearTourPass) really
+// a saved pass reads back with its join token, "No, not with <Name>" (clearTourPass) really
 // removes it, and a browser without storage simply has no pass. Prints "ok" or the
 // first failure. Run from anywhere: node frontend/scripts/check_tour_pass.mjs
 
@@ -27,7 +27,7 @@ const pass = readTourPass()
 expect("reads back code, name and join token", pass?.code === "JAMES" && pass.firstName === "James" && pass.joinToken === "tok-123")
 expect("lasts until a midnight within the next day", pass.until > Date.now() && pass.until <= Date.now() + 24 * 3600 * 1000)
 clearTourPass()
-expect("\"No, I'm done\" clears it", readTourPass() === null && store.size === 0)
+expect("\"No, not with <Name>\" clears it", readTourPass() === null && store.size === 0)
 
 saveTourPass("JAMES", "James", "tok-123")
 store.set("sawa.tourPass", JSON.stringify({ ...JSON.parse(store.get("sawa.tourPass")), until: Date.now() - 1 }))

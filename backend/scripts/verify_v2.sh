@@ -17,7 +17,7 @@
 #   - types (MUST 15): referrer type, product vs service (no photo line), the referrer
 #     page's Active / Not active badge (MUST 12);
 #   - a referred cash sale stays unconfirmed for the tourist until both confirm (MUST 18a);
-#   - "No, I'm done" (MUST 16): a pay with no code earns no referral, and the tour pass
+#   - "No, not with <Name>" (MUST 16): a pay with no code earns no referral, and the tour pass
 #     really clears (frontend/scripts/check_tour_pass.mjs).
 # Usage (from backend/): (set -a; source .env; set +a; bash scripts/verify_v2.sh)
 set -uo pipefail
@@ -215,7 +215,7 @@ S2_ID=$(body_of "$(call POST /sales "$MAKER" '{"amount":333}')" | json "['id']")
 Q2=$(body_of "$(call GET "/public/sales/$S2_ID?ref=JAMES&join=$TOKEN2")")
 check "rounding: 30% of 333 -> referrer 99 (rounded down), maker 234; they add up" \
   "$(echo "$Q2" | json "['product']['driver_amount']") $(echo "$Q2" | json "['product']['maker_amount']") $(echo "$Q2" | json "['total_amount']")" "99 234 333"
-# "No, I'm done" (MUST 16) sends no code: the join token alone earns nothing.
+# "No, not with <Name>" (MUST 16) sends no code: the join token alone earns nothing.
 P2=$(call POST "/public/sales/$S2_ID/pay" - "{\"payment_method\":\"cash\",\"join_token\":\"$TOKEN2\"}"); T2=$(body_of "$P2" | json "['id']"); TOK=$(body_of "$P2" | json "['tourist_confirm_token']")
 need "cash payment without a code" "$T2"
 curl -s -m 60 -X POST "$BASE_URL/transactions/$T2/confirm" -H "Content-Type: application/json" -d "{\"tourist_token\":\"$TOK\"}" >/dev/null
@@ -347,7 +347,7 @@ call POST /tours/current/end "$DRIVER" >/dev/null
 call POST "/sales/$S8_ID/cancel" "$SVC" >/dev/null
 
 echo
-echo "== Test 13: the tour pass clears on \"No, I'm done\" (MUST 16) =="
+echo "== Test 13: the tour pass clears on \"No, not with <Name>\" (MUST 16) =="
 check "saving, reading and clearing the tour pass (node)" "$(node ../frontend/scripts/check_tour_pass.mjs 2>&1)" "ok"
 
 echo

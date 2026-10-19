@@ -79,6 +79,7 @@ function SaleCheckout({ sale, onPaying }) {
   const [requote, setRequote] = useState(0)
   const [quote, setQuote] = useState(null)
   const [quoteError, setQuoteError] = useState(null)
+  const [quoteFailed, setQuoteFailed] = useState(false) // couldn't be loaded, even after a retry
   const [phone, setPhone] = useState("")
   const [phoneError, setPhoneError] = useState(null)
   const [submitError, setSubmitError] = useState(null)
@@ -97,13 +98,23 @@ function SaleCheckout({ sale, onPaying }) {
       const query = new URLSearchParams()
       if (code.trim()) query.set("ref", code.trim())
       if (joinToken) query.set("join", joinToken)
-      api(`/public/sales/${sale.id}${query.toString() ? `?${query}` : ""}`)
+      const path = `/public/sales/${sale.id}${query.toString() ? `?${query}` : ""}`
+      // A failed load (no connection, or a server error) is retried once after 2 s; a real
+      // answer such as "Sale not found" (4xx) is shown as it is.
+      const unreachable = (err) => !err.status || err.status >= 500
+      api(path)
+        .catch((err) => (unreachable(err) ? new Promise((r) => setTimeout(r, 2000)).then(() => api(path)) : Promise.reject(err)))
         .then((q) => {
           if (!live) return
           setQuote(q)
           setQuoteError(null)
+          setQuoteFailed(false)
         })
-        .catch((err) => live && setQuoteError(err.message))
+        .catch((err) => {
+          if (!live) return
+          setQuoteFailed(unreachable(err))
+          setQuoteError(unreachable(err) ? null : err.message)
+        })
     }, 350)
     return () => {
       live = false
@@ -176,8 +187,8 @@ function SaleCheckout({ sale, onPaying }) {
           If {pass.firstName || "your guide"} brought you here, they get their disclosed share of this sale.
         </p>
         <div className="flex flex-wrap gap-3">
-          <SecondaryButton onClick={() => setStillWith(true)}>Yes</SecondaryButton>
-          <SecondaryButton onClick={doneWithGuide}>No, I'm done</SecondaryButton>
+          <SecondaryButton onClick={() => setStillWith(true)}>Yes, still with {pass.firstName || pass.code}</SecondaryButton>
+          <SecondaryButton onClick={doneWithGuide}>No, not with {pass.firstName || pass.code}</SecondaryButton>
         </div>
       </section>
     )
@@ -214,6 +225,12 @@ function SaleCheckout({ sale, onPaying }) {
       </div>
 
       <ErrorNote>{quoteError}</ErrorNote>
+      {quoteFailed && (
+        <div role="alert" className="flex flex-col items-start gap-2 rounded-sawa border border-sawa-terracotta/40 bg-white p-3">
+          <p className="text-sm text-sawa-terracotta">Couldn't load the price.</p>
+          <SecondaryButton onClick={() => setRequote((n) => n + 1)}>Try again</SecondaryButton>
+        </div>
+      )}
       {quote && <PriceTransparencyCard {...cardFromCheckout(quote)} />}
       {quote?.driver && (
         <p className="text-[13px] text-sawa-text-muted">

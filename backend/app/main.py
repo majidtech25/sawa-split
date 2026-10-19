@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from . import login_limits
@@ -16,6 +17,7 @@ from .routers import account_admin, accounts, admin, auth, daraja, public, sales
 from .scheduler import build_scheduler
 
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("sawa.errors")
 
 # A hash made once at start-up, so /health times a real bcrypt check like login does.
 _HEALTH_HASH = hash_pin("1357")
@@ -29,7 +31,40 @@ async def lifespan(_app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
+class UnhandledErrorAsJson:
+    """Turns an UNHANDLED exception into a plain JSON 500 *inside* the CORS layer, so the
+    browser gets CORS headers and shows the real error instead of "Can't reach Sawa Split".
+    4xx answers (validation, "tour is full", auth) are HTTPExceptions that FastAPI turns
+    into responses further in, so they never reach here and stay exactly as they are. The
+    traceback is logged server-side only; the response carries no internal details."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception:
+            log.exception("Unhandled error on %s %s", scope.get("method"), scope.get("path"))
+            if started:  # part of a response is already out: nothing safe to replace it with
+                raise
+            await JSONResponse({"detail": "Something went wrong on our side. Try again in a moment."}, status_code=500)(scope, receive, send)
+
+
 app = FastAPI(title="Sawa Split API", lifespan=lifespan)
+# Middleware added later wraps the earlier one, so this error layer sits inside CORS.
+app.add_middleware(UnhandledErrorAsJson)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
