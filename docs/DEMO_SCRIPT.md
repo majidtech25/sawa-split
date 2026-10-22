@@ -50,7 +50,7 @@ Each beat is tagged with the matching step of the `/#/demo` walkthrough (section
 0. *(demo step 2)* **James's dashboard → Start tour** (see section 2), done before judges sit down. The card shows "0 of N joined".
 1. *(demo step 3)* Tourist phone scans James's referral QR → "Registered Sawa Split site intermediary · driver", "James · Active" → tap **Use James as my site intermediary today**. The join is counted on the server (James's card: "1 of N joined") and the phone keeps it until midnight EAT.
 2. *(demo step 4)* Wanjiru's dashboard → **New sale**: agreed amount (whole KSh, numeric keypad), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for the tourist to pay*.
-3. *(demo step 5)* Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes, still with James**. The sale appears with **Intermediary code JAMES** filled in and "Intermediary · James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly. ("No, not with James" removes James and clears the tour pass: Wanjiru gets 100%.)
+3. *(demo step 5)* Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes, still with James**. The sale appears with **Intermediary code JAMES** filled in and "Intermediary · James". The breakdown comes from the server: with the live legacy split (`SPLIT_MODEL=legacy`) James gets 30% of the agreed amount, rounded down to whole shillings, and Wanjiru the rest plus the photo fee; with the fixed split (`SPLIT_MODEL=fixed`, rule 4) it's 80% Wanjiru, 15% James, 5% Conservation fund, each rounded down except Wanjiru's. The total adds up exactly. ("No, not with James" removes James and clears the tour pass: Wanjiru gets 100%, or 95% plus 5% to the fund with the fixed split.)
 4. *(demo steps 6–7)* Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash. For cash, the tourist sees *Waiting for the seller and site intermediary to confirm*. Wanjiru confirms in her sale card ("Cash received? Confirm sale. Your share: KSh X"), and James confirms on his dashboard ("Confirm this sale. You earn KSh Y"). Only then does the tourist's receipt say *Cash payment confirmed*.
 5. *(demo steps 8 and 10)* Coordinator Tab 2: the sale and the split, plus Site intermediaries (JAMES, Driver: sales and commission) and Tours (James: group size, joined, sales, commission) update.
 6. Paying the same sale again, or an expired or cancelled one, is refused with a plain message. A full tour refuses another join ("James's tour is full"), and that tourist pays with no referral.
@@ -61,17 +61,17 @@ A click-through of one sale with sample data, entirely in the browser: it calls 
 
 | Step | Screen | What it shows |
 |---|---|---|
-| 1 | Coordinator | Registers Wanjiru (creator, 30% referral share, KSh 10 photo fee) and James (site intermediary · driver) in person, each with a PIN |
+| 1 | Coordinator | Registers Wanjiru (creator, fixed split: 80% creator · 15% site intermediary · 5% conservation, KSh 10 photo fee) and James (site intermediary · driver) in person, each with a PIN |
 | 2 | James | Starts a tour for a group of 4 |
 | 3 | Tourist | Scans James's QR: tour pass for the day |
 | 4 | Wanjiru | New sale: KSh 700, photo consent on (+KSh 10) |
 | 5 | Tourist | Scans the stall: "Still with James?" Yes / No, then the breakdown |
 | 6 | Tourist | Pays by M-Pesa (simulated); a note on cash and its two confirmations |
 | 7 | Tourist | Receipt |
-| 8 | Wanjiru, James | Split credited: Wanjiru KSh 500, James KSh 210 (No path: Wanjiru KSh 710) |
+| 8 | Wanjiru, James | Split credited: Wanjiru KSh 570 (560 + 10 photo), James KSh 105, Conservation fund KSh 35 (No path: Wanjiru KSh 675, fund KSh 35) |
 | 9 | Wanjiru | Payouts: KSh 500 threshold or the 18:00 sweep; Wanjiru withdraws (simulated) |
-| 10 | Coordinator | Reconciliation: collected = credited; Sawa Split keeps nothing |
-| 11 | Tourist | Coming next: find a verified site intermediary, one-scan check-in, 5% conservation contribution on top (preview, not built) |
+| 10 | Coordinator | Reconciliation: collected = creators + site intermediaries + fund; the fund on its own line; Sawa Split keeps nothing |
+| 11 | Tourist | Coming next: find a verified site intermediary, one-scan check-in (preview, not built) |
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 

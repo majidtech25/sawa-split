@@ -199,6 +199,8 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
   const { data, error, live, reload } = useReconciliation()
   const t = data?.totals
   const unaccounted = t ? Number(t.collected) - Number(t.ledger_paid) - Number(t.pending) : 0
+  // The Conservation fund (fixed split, migration 0020): shown once it holds or is owed anything.
+  const hasFund = t && (Number(t.fund) > 0 || Number(t.fund_debts_outstanding) > 0)
 
   return (
     <main className="mx-auto w-full max-w-[420px] px-4 py-8 md:max-w-6xl md:px-8">
@@ -235,12 +237,34 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
               value={t.debts_outstanding}
               note="Site intermediaries' shares of cash sales, moved from creators' M-Pesa earnings as they come in"
             />
+            {hasFund && Number(t.fund_debts_outstanding) > 0 && (
+              <Tile
+                label="Owed to the Conservation fund"
+                value={t.fund_debts_outstanding}
+                note="The fund's 5% of cash sales, moved from creators' M-Pesa earnings as they come in"
+              />
+            )}
           </section>
+
+          {hasFund && (
+            <section aria-label="Conservation fund" className="mt-3 rounded-sawa border border-sawa-border bg-sawa-surface p-4">
+              <p className="text-sm font-semibold">
+                Conservation fund: <span className="font-mono tabular-nums">{ksh(t.fund)}</span>
+              </p>
+              <p className="mt-1 text-[13px] text-sawa-text-muted">
+                Held for a partner community conservancy, transferred monthly (two approvals) once signed. Ring-fenced: never
+                paid out with creators' and site intermediaries' balances.
+              </p>
+            </section>
+          )}
 
           <p className={`mt-3 flex items-start gap-2 text-sm ${t.balanced ? "text-sawa-green" : "text-sawa-terracotta"}`}>
             {t.balanced ? (
               <>
-                <Check aria-hidden="true" className="size-4 shrink-0" /> Balanced: collected = paid out + still owed.
+                <Check aria-hidden="true" className="size-4 shrink-0" />{" "}
+                {hasFund
+                  ? `Balanced: collected = creators ${ksh(t.creators)} + site intermediaries ${ksh(t.intermediaries)} + fund ${ksh(t.fund)} = paid out + still owed.`
+                  : "Balanced: collected = paid out + still owed."}
               </>
             ) : (
               <>

@@ -125,17 +125,21 @@ async def _quote(session: AsyncSession, s, referral_code: str | None, join_token
             if tour is None:
                 referrer = None
             await session.commit()  # keeps a just-closed past tour
-    pct = Decimal(maker.default_split_driver_pct)
-    split = sales.compute_sale_split(s.amount, s.photo_fee, pct, referrer is not None)
+    split = sales.compute_sale_split(s.amount, s.photo_fee, Decimal(maker.default_split_driver_pct), referrer is not None)
+    pct = sales.FIXED_REFERRER_PCT if split["split_model"] == "fixed" else Decimal(maker.default_split_driver_pct)
     return Quote(
         producer=Party(id=str(maker.id), name=maker.name),
         site=maker.site,
         # The referrer's first name only; the code itself is what the tourist typed.
         driver=Party(id=str(referrer.id), name=sales.first_name(referrer.name)) if referrer else None,
         driver_split_pct=pct if referrer else Decimal(0),
-        product=ProductComponent(amount=s.amount, maker_amount=split["product_maker_amount"], driver_amount=split["product_driver_amount"]),
+        product=ProductComponent(
+            amount=s.amount, maker_amount=split["product_maker_amount"], driver_amount=split["product_driver_amount"],
+            fund_amount=split["fund_amount"],
+        ),
         photo=PhotoComponent(amount=s.photo_fee) if s.photo_fee else None,
         total_amount=split["total_amount"], maker_amount=split["maker_amount"], driver_amount=split["driver_amount"],
+        fund_amount=split["fund_amount"], split_model=split["split_model"],
         sale=_view(s), business_type=maker.business_type,
         referrer_type=referrer.referrer_type if referrer else None, referral_error=error,
     )

@@ -93,6 +93,8 @@ class InitiateTransactionResponse(BaseModel):
     total_amount: Decimal
     maker_amount: Decimal
     driver_amount: Decimal
+    fund_amount: Decimal = Decimal(0)
+    split_model: str = "legacy"
     confirmation_deadline: str | None = None
     tourist_confirm_token: str | None = None
 
@@ -136,11 +138,13 @@ async def start_payment(
                 insert into transactions
                     (producer_id, driver_id, payment_method, product_enabled, product_amount,
                      product_maker_amount, product_driver_amount, photo_enabled, photo_amount,
-                     total_amount, maker_amount, driver_amount, status, confirmation_deadline, open_sale_id, tour_id)
+                     total_amount, maker_amount, driver_amount, status, confirmation_deadline, open_sale_id, tour_id,
+                     split_model, fund_amount)
                 values
                     (:producer_id, :driver_id, :payment_method, :product_enabled, :product_amount,
                      :product_maker_amount, :product_driver_amount, :photo_enabled, :photo_amount,
-                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline, :open_sale_id, :tour_id)
+                     :total_amount, :maker_amount, :driver_amount, :status, :confirmation_deadline, :open_sale_id, :tour_id,
+                     :split_model, :fund_amount)
                 returning id
                 """
             ),
@@ -161,6 +165,9 @@ async def start_payment(
                 "confirmation_deadline": confirmation_deadline,
                 "open_sale_id": open_sale_id,
                 "tour_id": tour_id,
+                # Stored once, here: every later credit uses these amounts (migration 0020).
+                "split_model": split["split_model"],
+                "fund_amount": split["fund_amount"],
             },
         )
     ).one()
@@ -211,6 +218,8 @@ async def start_payment(
         total_amount=split["total_amount"],
         maker_amount=split["maker_amount"],
         driver_amount=split["driver_amount"],
+        fund_amount=split["fund_amount"],
+        split_model=split["split_model"],
         confirmation_deadline=confirmation_deadline.isoformat() if confirmation_deadline else None,
         tourist_confirm_token=tourist_confirm_token,
     )

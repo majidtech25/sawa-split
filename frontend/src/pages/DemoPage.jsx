@@ -9,7 +9,6 @@ import {
   Compass,
   Hand,
   Laptop,
-  Leaf,
   QrCode,
   ScanLine,
   Smartphone,
@@ -24,15 +23,15 @@ import { ksh } from "../lib/format"
 
 // A walkthrough of one sale from registration to reconciliation, with sample data,
 // entirely in this page: it calls no API (no payment, sale, tour or withdrawal endpoint)
-// and writes nothing to storage (no tour pass). The numbers follow the real rules: the
-// guide gets the maker's 30% of the agreed price rounded down, the maker the rest plus
-// the photo fee (never split); payouts are full-balance only, from KSh 500.
-const SALE = { maker: "Wanjiru Beadwork", makerFirst: "Wanjiru", site: "Talek gate", item: "Beaded necklace", amount: 700, photo: 10, pct: 30 }
+// and writes nothing to storage (no tour pass). The numbers follow the fixed split
+// (migration 0020): of the agreed price, 15% to the site intermediary and 5% to the
+// Conservation fund, each rounded down, the rest to the maker, plus the photo fee (never
+// split); payouts are full-balance only, from KSh 500. 700 + 10: 570 / 105 / 35.
+const SALE = { maker: "Wanjiru Beadwork", makerFirst: "Wanjiru", site: "Talek gate", item: "Beaded necklace", amount: 700, photo: 10 }
+const REF_PCT = 15
+const FUND_PCT = 5
 const GUIDE = { name: "James", type: "Driver", code: "JAMES", group: 4 }
 const THRESHOLD = 500
-// The roadmap's 5% conservation contribution, previewed on the last step only (not built):
-// rounded up to whole shillings, on top of the price. 5% of 710 = 35.5, so 36.
-const CONSERVATION_EXAMPLE = Math.ceil(((SALE.amount + SALE.photo) * 5) / 100)
 // "Find a verified guide near you" is the next step on the roadmap (SCOPE_V2 MUST 19):
 // shown here as a static preview, not built. No ratings, map or reviews.
 const NEARBY = [
@@ -41,8 +40,10 @@ const NEARBY = [
 ]
 
 function split(withGuide) {
-  const guide = withGuide ? Math.floor((SALE.amount * SALE.pct) / 100) : 0
-  return { guide, product: SALE.amount - guide, maker: SALE.amount - guide + SALE.photo, total: SALE.amount + SALE.photo }
+  const guide = withGuide ? Math.floor((SALE.amount * REF_PCT) / 100) : 0
+  const fund = Math.floor((SALE.amount * FUND_PCT) / 100)
+  const product = SALE.amount - guide - fund
+  return { guide, fund, product, maker: product + SALE.photo, total: SALE.amount + SALE.photo }
 }
 
 // Whose screen each step shows.
@@ -58,7 +59,7 @@ const STEPS = [
     label: "Register",
     screen: COORDINATOR,
     explain: () =>
-      "A coordinator registers every creator and site intermediary in person; there's no public sign-up. Wanjiru's referral share for site intermediaries is set here at 30%. It can never be more than 40%, so a creator always keeps at least 60% of the agreed price. Each gets a 4-digit PIN, handed over in person.",
+      "A coordinator registers every creator and site intermediary in person; there's no public sign-up. Every sale splits the same fixed way: 80% creator · 15% site intermediary · 5% conservation — Sawa Split keeps nothing. Each gets a 4-digit PIN, handed over in person.",
   },
   {
     label: "Start tour",
@@ -83,10 +84,10 @@ const STEPS = [
     screen: TOURIST,
     explain: (s, answered) =>
       answered === null
-        ? `The tourist scans the QR on Wanjiru's stand and sees her sale. First the checkout asks: still with James? Yes gives James his disclosed 30% (${ksh(split(true).guide)}); No means no referral, and Wanjiru keeps 100% (${ksh(split(false).maker)}).`
+        ? `The tourist scans the QR on Wanjiru's stand and sees her sale. First the checkout asks: still with James? Yes gives James his disclosed 15% (${ksh(split(true).guide)}); No means no referral, and Wanjiru gets 95% (${ksh(split(false).maker)} with the photo fee). Either way 5% goes to the Conservation fund.`
         : s.guide
-        ? `The tourist scans the QR on Wanjiru's stand and confirms they're still with James. The server works out the split before anyone pays: James gets 30% of the ${ksh(SALE.amount)}, rounded down (${ksh(s.guide)}); Wanjiru gets the rest plus the whole photo fee (${ksh(s.maker)}).`
-        : `The tourist scans the QR on Wanjiru's stand. They're no longer with James, so there's no referral and the tour pass is cleared: Wanjiru keeps 100%, ${ksh(s.maker)}.`,
+        ? `The tourist scans the QR on Wanjiru's stand and confirms they're still with James. The server works out the split before anyone pays: of the ${ksh(SALE.amount)}, James gets 15% (${ksh(s.guide)}), the Conservation fund 5% (${ksh(s.fund)}), and Wanjiru the rest plus the whole photo fee (${ksh(s.maker)}).`
+        : `The tourist scans the QR on Wanjiru's stand. They're no longer with James, so there's no referral and the tour pass is cleared: Wanjiru gets 95% plus the photo fee (${ksh(s.maker)}), the Conservation fund 5% (${ksh(s.fund)}).`,
   },
   {
     label: "Pay",
@@ -105,8 +106,8 @@ const STEPS = [
     screen: null, // both dashboards
     explain: (s) =>
       s.guide
-        ? `The moment Safaricom confirms, each share is credited: Wanjiru ${ksh(s.maker)}, James ${ksh(s.guide)}. Both see it live on their own dashboards. Every entry is written once and never edited.`
-        : `The moment Safaricom confirms, Wanjiru's ${ksh(s.maker)} is credited and shows live on her dashboard. Every entry is written once and never edited.`,
+        ? `The moment Safaricom confirms, each share is credited: Wanjiru ${ksh(s.maker)}, James ${ksh(s.guide)}, the Conservation fund ${ksh(s.fund)}. Wanjiru and James see it live on their own dashboards. Every entry is written once and never edited.`
+        : `The moment Safaricom confirms, Wanjiru's ${ksh(s.maker)} is credited and shows live on her dashboard, and the Conservation fund's ${ksh(s.fund)} is credited beside it. Every entry is written once and never edited.`,
   },
   {
     label: "Payouts",
@@ -120,13 +121,13 @@ const STEPS = [
     label: "Reconcile",
     screen: COORDINATOR,
     explain: () =>
-      "The coordinator sees every shilling. What M-Pesa collected equals exactly what was credited to creators and site intermediaries: paid out plus still owed. Platform fee: KSh 0.",
+      "The coordinator sees every shilling. What M-Pesa collected equals exactly what was credited to creators, site intermediaries and the Conservation fund: paid out plus still owed. The fund is ring-fenced, never paid out with the others. Platform fee: KSh 0.",
   },
   {
     label: "Coming next",
     screen: TOURIST,
     explain: () =>
-      "Next on the roadmap: tourists find a coordinator-verified site intermediary near them, and a group checks in with them in one scan. And a 5% conservation contribution, added on top of the price and paid by the tourist, held for a partner conservancy: creators and intermediaries keep their full share. Shown here as a preview; none of it is built yet.",
+      "Next on the roadmap: tourists find a coordinator-verified site intermediary near them, and a group checks in with them in one scan. Shown here as a preview; none of it is built yet.",
   },
 ]
 const LAST = STEPS.length
@@ -219,7 +220,7 @@ function Register() {
         <div className="mt-3 grid gap-3">
           <Filled label="Name" value={SALE.maker} />
           <Filled label="Site" value={SALE.site} />
-          <Filled label="Site intermediary referral (max 40%)" value={`${SALE.pct}%`} mono />
+          <Filled label="Site intermediary share" value={`Fixed: ${REF_PCT}%`} mono />
           <Filled label="Photo consent fee" value={ksh(SALE.photo)} mono />
         </div>
         <p className="mt-3 text-[13px] text-sawa-text-muted">
@@ -392,7 +393,7 @@ function ScanStall({ withGuide, answer, card }) {
           <PriceTransparencyCard {...card} />
           <p className="text-[13px] text-sawa-text-muted">
             {withGuide
-              ? `${GUIDE.name}'s share is the ${SALE.pct}% referral share the creator agreed with the coordinator, rounded down to whole shillings. `
+              ? `${GUIDE.name}'s share is the fixed ${REF_PCT}% site intermediary share, rounded down to whole shillings. `
               : ""}
             Photo consent always goes to the creator in full. Nothing is taken out for Sawa Split.
           </p>
@@ -420,6 +421,7 @@ function Pay({ s, withGuide, onPaid }) {
       <Card className="bg-sawa-bg">
         <Row label={SALE.makerFirst} value={ksh(s.maker)} />
         {withGuide && <Row label={`Intermediary · ${GUIDE.name}`} value={ksh(s.guide)} />}
+        <Row label={`Conservation fund (${FUND_PCT}%)`} value={ksh(s.fund)} />
         <Row label="Sawa Split" value={ksh(0)} />
         <div className="border-t border-sawa-border">
           <Row label="Total" value={ksh(s.total)} strong />
@@ -491,7 +493,7 @@ function Credited({ s }) {
           {s.guide > 0 ? (
             <>
               <p className="mt-2 font-mono text-3xl font-bold tabular-nums text-sawa-green">+{ksh(s.guide)}</p>
-              <p className="text-[13px] text-sawa-text-muted">His {SALE.pct}% referral, disclosed before the tourist paid</p>
+              <p className="text-[13px] text-sawa-text-muted">His {REF_PCT}% share, disclosed before the tourist paid</p>
             </>
           ) : (
             <p className="mt-2 text-[15px] text-sawa-text-muted">No referral on this sale: the tourist wasn't with him.</p>
@@ -559,14 +561,21 @@ function Reconcile({ s }) {
         <div className="border-t border-sawa-border">
           <Row label="Credited to Wanjiru" value={ksh(s.maker)} />
           {s.guide > 0 && <Row label="Credited to James" value={ksh(s.guide)} />}
+          <Row label="Credited to the Conservation fund" value={ksh(s.fund)} />
           <Row label="Platform fee" value={ksh(0)} />
         </div>
         <div className="border-t border-sawa-border">
           <Row label="Paid out to M-Pesa" value={ksh(s.maker)} />
-          <Row label="Still owed" value={ksh(s.guide)} />
+          <Row label="Still owed" value={ksh(s.guide + s.fund)} />
         </div>
       </Card>
-      <Done>Collected = credited = paid out + still owed.</Done>
+      <Done>Collected = creators + site intermediaries + fund = paid out + still owed.</Done>
+      <Card>
+        <p className="text-sm font-semibold">Conservation fund: {ksh(s.fund)}</p>
+        <p className="mt-1 text-[13px] text-sawa-text-muted">
+          Held for a partner community conservancy, transferred monthly (two approvals) once signed.
+        </p>
+      </Card>
       {s.guide > 0 && (
         <Card>
           <p className="text-sm font-semibold">Site intermediaries</p>
@@ -586,7 +595,7 @@ function ComingNext() {
       <div className="-mt-3">
         <h1 className="text-2xl font-semibold">Coming next</h1>
         <p className="mt-1 text-[15px] text-sawa-text-muted">
-          Find a verified site intermediary near you, then check in with them in one scan. Plus a conservation contribution on top of the price.
+          Find a verified site intermediary near you, then check in with them in one scan.
         </p>
       </div>
       <div>
@@ -611,26 +620,6 @@ function ComingNext() {
         <p className="mt-2 text-[13px] text-sawa-text-muted">
           The group scans their chosen site intermediary's QR once at the start of the day; every stall after that knows who brought
           them. Still no account and no app.
-        </p>
-      </Card>
-      <Card>
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <Leaf aria-hidden="true" className="size-4 text-sawa-green" /> 5% conservation contribution
-        </p>
-        <p className="mt-2 text-[13px] text-sawa-text-muted">
-          Added on top, paid by the tourist, its own line on every receipt, held for a partner conservancy. Creators and
-          intermediaries keep their full share.
-        </p>
-        <div className="mt-3 rounded-sawa border border-sawa-border bg-sawa-bg px-4 py-1">
-          <Row label="Beadwork" value={ksh(SALE.amount)} />
-          <Row label="Photo consent" value={ksh(SALE.photo)} />
-          <Row label="Conservation (5%)" value={ksh(CONSERVATION_EXAMPLE)} />
-          <div className="border-t border-sawa-border">
-            <Row label="Total" value={ksh(SALE.amount + SALE.photo + CONSERVATION_EXAMPLE)} strong />
-          </div>
-        </div>
-        <p className="mt-2 text-[13px] text-sawa-text-muted">
-          Wanjiru still gets {ksh(split(true).maker)} and James {ksh(split(true).guide)}, exactly as today.
         </p>
       </Card>
       <div className="border-t border-sawa-border pt-3">
@@ -689,7 +678,7 @@ export default function DemoPage() {
     site: SALE.site,
     producerName: SALE.makerFirst,
     driverName: withGuide ? GUIDE.name : null,
-    product: { amount: SALE.amount, maker_amount: s.product, driver_amount: s.guide },
+    product: { amount: SALE.amount, maker_amount: s.product, driver_amount: s.guide, fund_amount: s.fund },
     photo: { amount: SALE.photo },
     total: s.total,
   })

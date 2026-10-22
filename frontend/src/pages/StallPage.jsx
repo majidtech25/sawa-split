@@ -232,12 +232,20 @@ function SaleCheckout({ sale, onPaying }) {
         </div>
       )}
       {quote && <PriceTransparencyCard {...cardFromCheckout(quote)} />}
-      {quote?.driver && (
+      {quote?.split_model === "fixed" ? (
         <p className="text-[13px] text-sawa-text-muted">
-          {quote.driver.name}'s share is the {Number(quote.driver_split_pct)}% referral share the creator agreed with the
-          coordinator, rounded down to whole shillings. Everything else goes to the creator. Nothing is taken out for Sawa
-          Split.
+          {quote.driver ? `${quote.driver.name} gets the fixed 15% site intermediary share and ` : ""}
+          the Conservation fund 5%, each rounded down to whole shillings. Everything else goes to the creator. Nothing is
+          taken out for Sawa Split.
         </p>
+      ) : (
+        quote?.driver && (
+          <p className="text-[13px] text-sawa-text-muted">
+            {quote.driver.name}'s share is the {Number(quote.driver_split_pct)}% referral share the creator agreed with the
+            coordinator, rounded down to whole shillings. Everything else goes to the creator. Nothing is taken out for Sawa
+            Split.
+          </p>
+        )
       )}
 
       {quote && (

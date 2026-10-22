@@ -21,13 +21,20 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 class Totals(BaseModel):
     collected: Decimal          # M-Pesa money received (confirmed + disputed); cash never reaches the account
     disbursed: Decimal          # paid out by B2C
-    pending: Decimal            # M-Pesa money still owed to makers and drivers (pending + available + frozen)
+    pending: Decimal            # M-Pesa money still owed to makers, drivers and the fund (pending + available + frozen)
     frozen: Decimal             # the part of `pending` held by disputes
     ledger_paid: Decimal        # ledger entries marked paid
-    balanced: bool              # collected == ledger_paid + pending, and ledger_paid == disbursed
+    balanced: bool              # collected == ledger_paid + pending == creators + intermediaries + fund,
+                                # and ledger_paid == disbursed
     needs_attention: int        # expired cash sales + payouts waiting for a coordinator retry + flagged payment checks
     cash_recorded: Decimal      # confirmed cash sales (disputed included): held by makers, never paid out by B2C
     debts_outstanding: Decimal  # drivers' shares of cash sales that makers still owe
+    # Migration 0020: who the M-Pesa money belongs to (paid + still owed), and the
+    # Conservation fund, ring-fenced: held in the account, never paid out by B2C.
+    creators: Decimal = Decimal(0)
+    intermediaries: Decimal = Decimal(0)
+    fund: Decimal = Decimal(0)
+    fund_debts_outstanding: Decimal = Decimal(0)  # the fund's shares of cash sales that makers still owe
 
 
 class TransactionRow(BaseModel):
@@ -40,6 +47,7 @@ class TransactionRow(BaseModel):
     total_amount: Decimal
     maker_amount: Decimal
     driver_amount: Decimal
+    fund_amount: Decimal = Decimal(0)
     confirmation_deadline: str | None
 
 
@@ -133,7 +141,14 @@ async def reconciliation(
                      where payment_method = 'mpesa' and status in ('confirmed', 'disputed')) as collected,
                   (select coalesce(sum(total_amount), 0) from transactions
                      where payment_method = 'cash' and status in ('cash_confirmed', 'disputed')) as cash_recorded,
-                  (select coalesce(sum(amount), 0) from cash_debts where status = 'outstanding') as debts_outstanding,
+                  (select coalesce(sum(amount), 0) from cash_debts where status = 'outstanding' and creditor_type = 'driver') as debts_outstanding,
+                  (select coalesce(sum(amount), 0) from cash_debts where status = 'outstanding' and creditor_type = 'fund') as fund_debts_outstanding,
+                  (select coalesce(sum(amount), 0) from wallet_ledger_entries
+                     where recipient_type = 'maker' and status in ('pending', 'available', 'frozen', 'paid')) as creators,
+                  (select coalesce(sum(amount), 0) from wallet_ledger_entries
+                     where recipient_type = 'driver' and status in ('pending', 'available', 'frozen', 'paid')) as intermediaries,
+                  (select coalesce(sum(amount), 0) from wallet_ledger_entries
+                     where recipient_type = 'fund' and status in ('pending', 'available', 'frozen', 'paid')) as fund,
                   (select coalesce(sum(amount), 0) from withdrawal_requests where status = 'paid') as disbursed,
                   (select coalesce(sum(amount), 0) from wallet_ledger_entries where status in ('pending', 'available', 'frozen')) as pending,
                   (select coalesce(sum(amount), 0) from wallet_ledger_entries where status = 'frozen') as frozen,
@@ -152,10 +167,15 @@ async def reconciliation(
         pending=t.pending,
         frozen=t.frozen,
         ledger_paid=t.ledger_paid,
-        balanced=t.collected == t.ledger_paid + t.pending and t.ledger_paid == t.disbursed,
+        balanced=t.collected == t.ledger_paid + t.pending == t.creators + t.intermediaries + t.fund
+        and t.ledger_paid == t.disbursed,
         needs_attention=t.needs_attention,
         cash_recorded=t.cash_recorded,
         debts_outstanding=t.debts_outstanding,
+        creators=t.creators,
+        intermediaries=t.intermediaries,
+        fund=t.fund,
+        fund_debts_outstanding=t.fund_debts_outstanding,
     )
 
     # STK Push Query checks a coordinator should see: anything Safaricom contradicted,
@@ -183,11 +203,12 @@ async def reconciliation(
         await session.execute(
             text(
                 """
-                select d.id, d.created_at, d.amount, p.name as producer_name, dr.name as driver_name,
+                select d.id, d.created_at, d.amount, p.name as producer_name,
+                       coalesce(dr.name, 'Conservation fund') as driver_name,
                        t.status = 'disputed' as disputed
                 from cash_debts d
                 join producers p on p.id = d.producer_id
-                join drivers dr on dr.id = d.driver_id
+                left join drivers dr on dr.id = d.driver_id  -- no driver: owed to the fund
                 join transactions t on t.id = d.transaction_id
                 where d.status = 'outstanding'
                 order by d.created_at
@@ -201,7 +222,7 @@ async def reconciliation(
             text(
                 """
                 select t.id, t.created_at, p.name as producer_name, d.name as driver_name, t.payment_method,
-                       t.status, t.total_amount, t.maker_amount, t.driver_amount, t.confirmation_deadline
+                       t.status, t.total_amount, t.maker_amount, t.driver_amount, t.fund_amount, t.confirmation_deadline
                 from transactions t
                 join producers p on p.id = t.producer_id
                 left join drivers d on d.id = t.driver_id
@@ -299,7 +320,7 @@ async def reconciliation(
                 id=str(r.id), created_at=r.created_at.isoformat(), producer_name=r.producer_name,
                 driver_name=r.driver_name, payment_method=r.payment_method, status=r.status,
                 total_amount=r.total_amount, maker_amount=r.maker_amount, driver_amount=r.driver_amount,
-                confirmation_deadline=r.confirmation_deadline.isoformat() if r.confirmation_deadline else None,
+                fund_amount=r.fund_amount, confirmation_deadline=r.confirmation_deadline.isoformat() if r.confirmation_deadline else None,
             )
             for r in txns
         ],

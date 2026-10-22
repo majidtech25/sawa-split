@@ -10,12 +10,16 @@ it 'paid'; a failed STK Push, an expired cash sale or a Safaricom "not paid" rel
 ('open' again while its 30 minutes last, else 'expired'). Paid, expired and cancelled
 sales can't be paid.
 
-Split, in whole shillings (rules 1-4):
-  referrer = floor(agreed amount x maker's driver %)   (no code: 0)
-  maker    = agreed amount - referrer  +  photo fee (if photo consent; never split)
-The referrer's share is rounded down, so the parts always add up exactly, the maker's
-product share never falls below their floor (rule 3), and no shilling is left over for
-anyone else (rule 4).
+Split, in whole shillings (rules 1-4), as SPLIT_MODEL says (migration 0020):
+  legacy  referrer = floor(agreed amount x maker's driver %)   (no code: 0)
+          maker    = agreed amount - referrer  +  photo fee (if photo consent; never split)
+  fixed   referrer = floor(agreed amount x 15%)                 (no code: 0)
+          fund     = floor(agreed amount x 5%)                  (the Conservation fund)
+          maker    = agreed amount - referrer - fund  +  photo fee
+Shares other than the maker's are rounded down and the maker gets the remainder, so the
+parts always add up exactly and the maker's product share never falls below their floor
+(rule 3). Sawa Split keeps nothing (rule 4). The split is stored on the transaction when
+the payment starts, and every later credit uses the stored amounts.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -24,18 +28,39 @@ from decimal import ROUND_FLOOR, Decimal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .config import settings
+
 SALE_MINUTES = 30
 
 
-def compute_sale_split(amount: Decimal, photo_fee: Decimal | None, driver_pct: Decimal, has_referrer: bool) -> dict:
-    """Same shape as ledger.compute_split, whole shillings (see the module docstring)."""
+FIXED_REFERRER_PCT = Decimal(15)
+FIXED_FUND_PCT = Decimal(5)
+
+
+def _floor_pct(amount: Decimal, pct: Decimal) -> Decimal:
+    return (amount * pct / Decimal(100)).to_integral_value(rounding=ROUND_FLOOR)
+
+
+def compute_sale_split(
+    amount: Decimal, photo_fee: Decimal | None, driver_pct: Decimal, has_referrer: bool, model: str | None = None
+) -> dict:
+    """Same shape as ledger.compute_split, whole shillings (see the module docstring).
+    `model` defaults to SPLIT_MODEL; driver_pct is used only by legacy."""
+    model = model or settings.split_model
     amount = Decimal(amount)
-    referrer = (amount * Decimal(driver_pct) / Decimal(100)).to_integral_value(rounding=ROUND_FLOOR) if has_referrer else Decimal(0)
+    if model == "fixed":
+        referrer = _floor_pct(amount, FIXED_REFERRER_PCT) if has_referrer else Decimal(0)
+        fund = _floor_pct(amount, FIXED_FUND_PCT)
+    else:
+        referrer = _floor_pct(amount, Decimal(driver_pct)) if has_referrer else Decimal(0)
+        fund = Decimal(0)
     photo = Decimal(photo_fee) if photo_fee else Decimal(0)
-    product_maker = amount - referrer
+    product_maker = amount - referrer - fund
     return {
+        "split_model": model,
         "product_maker_amount": product_maker,
         "product_driver_amount": referrer,
+        "fund_amount": fund,
         "maker_amount": product_maker + photo,
         "driver_amount": referrer,
         "total_amount": amount + photo,

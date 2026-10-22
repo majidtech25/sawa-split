@@ -14,7 +14,9 @@ function receiptCard(r) {
     site: r.site,
     producerName: r.producer_name,
     driverName: r.driver_name,
-    product: r.product_amount ? { amount: r.product_amount, maker_amount: r.product_maker_amount, driver_amount: r.product_driver_amount } : null,
+    product: r.product_amount
+      ? { amount: r.product_amount, maker_amount: r.product_maker_amount, driver_amount: r.product_driver_amount, fund_amount: r.fund_amount }
+      : null,
     photo: r.photo_amount ? { amount: r.photo_amount } : null,
     total: r.total_amount,
     service: r.business_type === "service",

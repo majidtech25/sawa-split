@@ -32,21 +32,25 @@ export function useCheckout(producerId, search) {
 // Shapes the API's checkout (or a receipt) into PriceTransparencyCard's props: one
 // card per component, never merged (CLAUDE.md rule 1), photo never split (rule 2).
 // A service includes photography in its price (SCOPE_V2 MUST 15): no photo line, a note
-// instead, and the whole price splits as usual.
+// instead, and the whole price splits as usual. With the fixed split (migration 0020) the
+// product also shows the Conservation fund's 5%, computed by the server like every share.
+export const FUND_NOTE = "Ring-fenced for a partner community conservancy — reported publicly."
+
 export function cardProps({ site, producerName, driverName, product, photo, total, service = false }) {
   const components = []
   if (product) {
+    const fund = Number(product.fund_amount || 0)
+    const notes = [service ? "Photography included" : null, fund > 0 ? FUND_NOTE : null].filter(Boolean)
     components.push({
       key: "product",
       label: service ? "Service" : "Product",
       amount: product.amount,
-      note: service ? "Photography included" : null,
-      breakdown: driverName
-        ? [
-            { label: `Creator · ${producerName}`, amount: product.maker_amount, highlight: true },
-            { label: `Intermediary · ${driverName}`, amount: product.driver_amount },
-          ]
-        : [{ label: `Creator · ${producerName}`, amount: product.amount, highlight: true }],
+      note: notes.length ? notes.join(" ") : null,
+      breakdown: [
+        { label: `Creator · ${producerName}`, amount: product.maker_amount ?? product.amount, highlight: true },
+        ...(driverName ? [{ label: `Intermediary · ${driverName}`, amount: product.driver_amount }] : []),
+        ...(fund > 0 ? [{ label: "Conservation fund (5%)", amount: product.fund_amount }] : []),
+      ],
     })
   }
   if (photo) {

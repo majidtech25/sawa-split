@@ -22,7 +22,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import daraja, sales
-from .ledger import available_balance, blocking_withdrawal, lock_money, outstanding_debt, payable_balance, settle_debts
+from .ledger import (
+    available_balance, blocking_withdrawal, fund_held, lock_money, outstanding_debt, payable_balance, settle_debts,
+)
 from .config import settings
 from .db import async_session
 
@@ -84,6 +86,9 @@ async def start_payout(session: AsyncSession, recipient_type: str, recipient_id,
     fails, the one automatic retry (rule 11) runs here, straight away; a failure the
     B2C callback reports later gets its retry from the callback instead. Returns the
     latest attempt's row."""
+    if recipient_type not in ("maker", "driver"):
+        # The Conservation fund is ring-fenced: never paid out by B2C (migration 0020).
+        raise PayoutRefused("Only a creator or a site intermediary can be paid out.")
     if recipient_type == "maker":
         # Drivers are owed first: settle what the maker can cover, and keep it even
         # if this payout is then refused.
@@ -100,10 +105,24 @@ async def start_payout(session: AsyncSession, recipient_type: str, recipient_id,
     balance = await payable_balance(session, recipient_type, recipient_id)
     owed = await outstanding_debt(session, recipient_id) if recipient_type == "maker" else Decimal(0)
     if balance <= 0 or balance < minimum:
+        creditors = "site intermediaries"
+        if owed:
+            kinds = set(
+                (
+                    await session.execute(
+                        text("select distinct creditor_type from cash_debts where producer_id = :pid and status = 'outstanding'"),
+                        {"pid": recipient_id},
+                    )
+                ).scalars()
+            )
+            if kinds == {"fund"}:
+                creditors = "the Conservation fund"
+            elif "fund" in kinds:
+                creditors = "site intermediaries and the Conservation fund"
         reason = (
             f"Payable balance (KES {balance}) is below the KES {minimum} withdrawal threshold."
             if balance > 0 or not owed
-            else f"KES {owed} from cash sales is still owed to site intermediaries, and is paid from your M-Pesa earnings first."
+            else f"KES {owed} from cash sales is still owed to {creditors}, and is paid from your M-Pesa earnings first."
         )
         raise PayoutRefused(reason)
     row, initiated = await _initiate(session, recipient_type, recipient_id, balance)
@@ -227,8 +246,13 @@ async def _initiate(session: AsyncSession, recipient_type: str, recipient_id, am
 
 async def _check_mpesa_cover(session: AsyncSession, recipient_type: str, recipient_id, amount: Decimal) -> None:
     """The last line of defence before B2C: everything sent or being sent, plus this
-    payout, must fit within the M-Pesa money collected, and this payout within the
-    recipient's own available entries. Runs under the money lock."""
+    payout, must fit within the M-Pesa money collected less the Conservation fund's
+    (ring-fenced, migration 0020), and this payout within the recipient's own available
+    entries. Runs under the money lock."""
+    if recipient_type not in ("maker", "driver"):
+        await session.rollback()
+        log.critical("REFUSED B2C payout of KES %s to %s %s: not a creator or site intermediary", amount, recipient_type, recipient_id)
+        raise PayoutCapExceeded(f"Refused a KES {amount} payout to {recipient_type}: only creators and site intermediaries are paid out.")
     t = (
         await session.execute(
             text(
@@ -243,9 +267,13 @@ async def _check_mpesa_cover(session: AsyncSession, recipient_type: str, recipie
         )
     ).one()
     own = await available_balance(session, recipient_type, recipient_id)
+    fund = await fund_held(session)
     problem = None
-    if t.committed + amount > t.collected:
-        problem = f"M-Pesa collected KES {t.collected}, already paid or paying KES {t.committed}"
+    if t.committed + amount > t.collected - fund:
+        problem = (
+            f"M-Pesa collected KES {t.collected}, of which KES {fund} is the Conservation fund's, "
+            f"already paid or paying KES {t.committed}"
+        )
     elif amount > own:
         problem = f"the recipient's available M-Pesa-sourced balance is only KES {own}"
     if problem:
@@ -270,6 +298,25 @@ async def retry_after_callback_failure(withdrawal_id) -> None:
             log.warning("Automatic retry of withdrawal %s refused: %s", withdrawal_id, exc)
 
 
+async def sweep_candidates(session: AsyncSession):
+    """Who the sweep tries to pay: creators and site intermediaries with >= KES 500
+    available. Never the Conservation fund, which is ring-fenced (migration 0020)."""
+    return (
+        await session.execute(
+            text(
+                """
+                select recipient_type, recipient_id, sum(amount) as balance
+                from wallet_ledger_entries
+                where status = 'available' and recipient_type in ('maker', 'driver')
+                group by recipient_type, recipient_id
+                having sum(amount) >= :min
+                """
+            ),
+            {"min": MIN_WITHDRAWAL_AMOUNT},
+        )
+    ).all()
+
+
 async def run_daily_sweep() -> list[dict]:
     """Rule 10: at 18:00 EAT, pay out everyone with >= KES 500 available who hasn't
     already withdrawn today (EAT). Frozen entries never count — they aren't
@@ -287,22 +334,7 @@ async def run_daily_sweep() -> list[dict]:
             await settle_debts(session, producer_id)
             await session.commit()
 
-        candidates = (
-            await session.execute(
-                text(
-                    """
-                    select recipient_type, recipient_id, sum(amount) as balance
-                    from wallet_ledger_entries
-                    where status = 'available'
-                    group by recipient_type, recipient_id
-                    having sum(amount) >= :min
-                    """
-                ),
-                {"min": MIN_WITHDRAWAL_AMOUNT},
-            )
-        ).all()
-
-        for c in candidates:
+        for c in await sweep_candidates(session):
             withdrew_today = (
                 await session.execute(
                     text(

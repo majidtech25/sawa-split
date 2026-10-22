@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import QRCode from "qrcode"
 import { Check } from "lucide-react"
 import { ErrorNote, Field, Screen, SecondaryButton } from "../components/ui"
@@ -71,7 +71,19 @@ export default function RegisterPage() {
   const [submitError, setSubmitError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(null)
+  // With the fixed split (migration 0020) the % below is ignored: every intermediary gets 15%.
+  const [fixedSplit, setFixedSplit] = useState(false)
   const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }))
+
+  useEffect(() => {
+    let live = true
+    api("/public/config")
+      .then((c) => live && setFixedSplit(c.split_model === "fixed"))
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
 
   function validate() {
     const e = {}
@@ -81,7 +93,7 @@ export default function RegisterPage() {
     if (!/^\d{4}$/.test(form.pin)) e.pin = "Choose a 4-digit PIN to hand over in person."
     if (role === "producer") {
       const split = Number(form.split)
-      if (form.split === "" || Number.isNaN(split) || split < 0 || split > 40)
+      if (!fixedSplit && (form.split === "" || Number.isNaN(split) || split < 0 || split > 40))
         e.split = "Between 0 and 40. The creator always keeps at least 60% of the product price."
       if (!form.product && !form.photo) e.charges = "Pick at least one: product, photo consent, or both."
       if (form.businessType === "service" && (form.photo || form.photoFee !== ""))
@@ -104,7 +116,7 @@ export default function RegisterPage() {
         ? {
             ...base,
             site: form.site.trim() || null,
-            default_split_driver_pct: Number(form.split),
+            default_split_driver_pct: fixedSplit ? 15 : Number(form.split),
             charges_product: form.product,
             charges_photo: form.photo,
             photo_fee: form.photoFee === "" ? null : Number(form.photoFee),
@@ -223,15 +235,25 @@ export default function RegisterPage() {
                   : "Photo consent can be added to a sale as its own line, paid to the creator in full."
               }
             />
-            <Field
-              id="reg-split"
-              label="Site intermediary referral (% of the price)"
-              inputMode="numeric"
-              value={form.split}
-              onChange={(e) => set("split")(e.target.value.replace(/[^\d.]/g, ""))}
-              error={errors.split}
-              hint="At most 40%. The creator keeps at least 60% of the product price, and all of photo consent."
-            />
+            {fixedSplit ? (
+              <div className="flex flex-col gap-1">
+                <p className="text-[13px] text-sawa-text-muted">Site intermediary share</p>
+                <p className="font-mono text-[15px] text-sawa-text">Fixed: 15%</p>
+                <p className="text-xs text-sawa-text-muted">
+                  Every sale: 80% creator, 15% site intermediary, 5% Conservation fund. Photo consent goes to the creator in full.
+                </p>
+              </div>
+            ) : (
+              <Field
+                id="reg-split"
+                label="Site intermediary referral (% of the price)"
+                inputMode="numeric"
+                value={form.split}
+                onChange={(e) => set("split")(e.target.value.replace(/[^\d.]/g, ""))}
+                error={errors.split}
+                hint="At most 40%. The creator keeps at least 60% of the product price, and all of photo consent."
+              />
+            )}
             <fieldset className="flex flex-col gap-2 border-t border-sawa-border pt-4">
               <legend className="text-[13px] text-sawa-text-muted">Charges for</legend>
               <Checkbox id="reg-product" checked={form.product} onChange={set("product")}>

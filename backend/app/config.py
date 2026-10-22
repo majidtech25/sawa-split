@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     #             "Payment being verified" and nobody is credited. PRODUCTION MUST USE THIS.
     stk_query_mode: Literal["flag", "enforce"] = "flag"
 
+    # How an open sale's product price splits (CLAUDE.md rule 4, migration 0020):
+    #   legacy - the coordinator-set % per creator (default; the behaviour before 0020)
+    #   fixed  - 80% creator, 15% site intermediary, 5% Conservation fund
+    # Stored on each transaction when it's created, so changing this never re-splits a
+    # sale already made. v1 signed price cards always use legacy.
+    split_model: Literal["legacy", "fixed"] = "legacy"
+
     # Unlocks GET /health's full timings (send it as the X-Health-Timing-Key header).
     # Empty disables them; the public /health stays a cheap database check.
     health_timing_key: str = ""

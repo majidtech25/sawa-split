@@ -109,6 +109,32 @@ MUST:
       cache, old caches deleted on activate. Registered only in production builds.
     - Accessibility pass on the pages touched (lang, labels, button names, 44px tap
       targets); anything bigger is listed, not fixed, without asking.
+21. Fixed split with the Conservation fund (2026-10-22, migration 0020; revises CLAUDE.md
+    rule 4 and section 6). "Sawa Split keeps nothing. The product price is split FIXED:
+    80% creator, 15% site intermediary, 5% Conservation fund. No intermediary on the
+    sale → 95% creator, 5% fund. The photo-consent fee stays 100% creator, not split.
+    Whole shillings: intermediary = floor(15%), fund = floor(5%), creator gets the
+    remainder. The Conservation fund is ring-fenced: never paid out by the payout
+    engine, reported separately. No other fee, reserve or bucket."
+    - Switch: SPLIT_MODEL=legacy (default, the coordinator-set %, unchanged) | fixed.
+      In fixed mode the coordinator % is ignored and shown as "Fixed: 15%". v1 signed
+      price cards always split legacy.
+    - The split is computed once, when the payment starts, and stored on the
+      transaction (split_model, fund_amount and every share). Every credit (callback,
+      late credit, cash confirmation) uses the stored amounts, never a recompute.
+    - Checkout and receipt: Creator / Site intermediary / Conservation fund (5%), with
+      "Ring-fenced for a partner community conservancy — reported publicly."
+    - Ledger: a separate fund account (recipient 'fund'), excluded from withdrawals,
+      the 18:00 sweep and payouts. The payout cap: collected − fund balance ≥ paid or
+      paying + this payout. No transfer feature yet.
+    - Cash: the creator holds the cash, so the intermediary's 15% and the fund's 5%
+      become debts from the creator, settled from her M-Pesa earnings like rule 12's
+      intermediary debt; a disputed sale's fund debt waits like the intermediary's.
+    - Reconciliation: "Conservation fund: KSh X — held for a partner community
+      conservancy, transferred monthly (two approvals) once signed."; balanced means
+      collected = creators + intermediaries + fund = paid out + still owed.
+    - Tests: backend/scripts/verify_split_model.sh (simulated callbacks only, no STK
+      Push, no B2C).
 
 STRETCH (only after MUST passes live, ask me first): per-person "ticket" sale: price
 per person, many payments, "N paid", maker closes, auto-close after 2 h.

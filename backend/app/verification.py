@@ -101,6 +101,7 @@ async def _credit(session: AsyncSession, transaction_id, from_status: str) -> bo
         driver_id=updated.driver_id,
         maker_amount=updated.maker_amount,
         driver_amount=updated.driver_amount,
+        fund_amount=updated.fund_amount,  # stored at creation: a late credit never re-splits
     )
     await session.commit()
     await settle_debts(session, updated.producer_id)

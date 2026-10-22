@@ -5,6 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 CENTS = Decimal("0.01")
 
+# The Conservation fund's one ledger account (migration 0020). Ring-fenced: its entries are
+# never paid out by B2C, and the payout cap keeps its money out of every payout.
+FUND_ID = "00000000-0000-0000-0000-00000000f00d"
+
 
 def compute_split(
     *, product_amount: Decimal | None, photo_amount: Decimal | None, driver_pct: Decimal, has_driver: bool
@@ -30,8 +34,10 @@ def compute_split(
     total_amount = (product_amount or Decimal("0")) + (photo_amount or Decimal("0"))
 
     return {
+        "split_model": "legacy",  # v1 price cards always split this way (migration 0020)
         "product_maker_amount": product_maker_amount,
         "product_driver_amount": product_driver_amount,
+        "fund_amount": Decimal("0"),
         "maker_amount": maker_amount,
         "driver_amount": driver_amount,
         "total_amount": total_amount,
@@ -46,10 +52,12 @@ async def write_ledger_entries(
     driver_id: str | None,
     maker_amount: Decimal,
     driver_amount: Decimal,
+    fund_amount: Decimal = Decimal("0"),
 ) -> None:
     """An M-Pesa sale's split, written once its STK callback confirms it (CLAUDE.md
-    section 6). Cash sales go through record_cash_sale below instead: their money is
-    never in the M-Pesa account, so it must never become payable."""
+    section 6), from the amounts stored on the transaction. Cash sales go through
+    record_cash_sale below instead: their money is never in the M-Pesa account, so it
+    must never become payable."""
     await session.execute(
         text(
             """
@@ -71,6 +79,16 @@ async def write_ledger_entries(
                 """
             ),
             {"driver_id": driver_id, "amount": driver_amount, "txn_id": transaction_id},
+        )
+    if fund_amount > 0:
+        await session.execute(
+            text(
+                """
+                insert into wallet_ledger_entries (recipient_type, recipient_id, amount, status, transaction_id)
+                values ('fund', :fund_id, :amount, 'pending', :txn_id)
+                """
+            ),
+            {"fund_id": FUND_ID, "amount": fund_amount, "txn_id": transaction_id},
         )
 
     # Section 6 step 3: balance becomes available once cleared for payout eligibility.
@@ -104,7 +122,8 @@ async def lock_money(session: AsyncSession) -> None:
 
 async def record_cash_sale(session: AsyncSession, txn) -> None:
     """A cash sale has just reached cash_confirmed. Records the maker's share as held
-    in cash, opens the driver's share as a debt, then tries to settle it at once."""
+    in cash, opens the driver's share and the Conservation fund's share (fixed split) as
+    debts the maker owes, then tries to settle them at once."""
     if txn.maker_amount > 0:
         await session.execute(
             text(
@@ -121,6 +140,15 @@ async def record_cash_sale(session: AsyncSession, txn) -> None:
             ),
             {"txn_id": txn.id, "producer_id": txn.producer_id, "driver_id": txn.driver_id, "amount": txn.driver_amount},
         )
+    if txn.fund_amount > 0:
+        await session.execute(
+            text(
+                "insert into cash_debts (transaction_id, producer_id, driver_id, creditor_type, amount) "
+                "values (:txn_id, :producer_id, null, 'fund', :amount)"
+            ),
+            {"txn_id": txn.id, "producer_id": txn.producer_id, "amount": txn.fund_amount},
+        )
+    if (txn.driver_id is not None and txn.driver_amount > 0) or txn.fund_amount > 0:
         await settle_debts(session, txn.producer_id)
 
 
@@ -155,10 +183,10 @@ async def settle_debts(session: AsyncSession, producer_id) -> int:
         await session.execute(
             text(
                 """
-                select d.id, d.transaction_id, d.driver_id, d.amount
+                select d.id, d.transaction_id, d.driver_id, d.creditor_type, d.amount
                 from cash_debts d join transactions t on t.id = d.transaction_id
                 where d.producer_id = :pid and d.status = 'outstanding' and t.status <> 'disputed'
-                order by d.created_at
+                order by d.created_at, d.creditor_type
                 """
             ),
             {"pid": producer_id},
@@ -191,9 +219,13 @@ async def settle_debts(session: AsyncSession, producer_id) -> int:
         await session.execute(
             text(
                 "insert into wallet_ledger_entries (recipient_type, recipient_id, amount, status, transaction_id, settlement_id) "
-                "values ('driver', :did, :amount, 'available', :txn_id, :sid)"
+                "values (:rtype, :rid, :amount, 'available', :txn_id, :sid)"
             ),
-            {"did": debt.driver_id, "amount": debt.amount, "txn_id": debt.transaction_id, "sid": debt.id},
+            {
+                "rtype": debt.creditor_type,
+                "rid": FUND_ID if debt.creditor_type == "fund" else debt.driver_id,
+                "amount": debt.amount, "txn_id": debt.transaction_id, "sid": debt.id,
+            },
         )
         change = total - debt.amount
         if change > 0:
@@ -226,8 +258,21 @@ async def available_balance(session: AsyncSession, recipient_type: str, recipien
     ).scalar_one()
 
 
+async def fund_held(session: AsyncSession) -> Decimal:
+    """The Conservation fund's M-Pesa money, still in the account: ring-fenced, so the
+    payout cap keeps it out of every payout (migration 0020)."""
+    return (
+        await session.execute(
+            text(
+                "select coalesce(sum(amount), 0) from wallet_ledger_entries "
+                "where recipient_type = 'fund' and status in ('pending', 'available', 'frozen')"
+            )
+        )
+    ).scalar_one()
+
+
 async def outstanding_debt(session: AsyncSession, producer_id) -> Decimal:
-    """What this maker still owes drivers from cash sales, leaving out disputed sales
+    """What this maker still owes drivers and the Conservation fund from cash sales, leaving out disputed sales
     (rule 13: excluded from every withdrawal calculation until resolved)."""
     return (
         await session.execute(

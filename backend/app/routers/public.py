@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import links, sales, tours
+from ..config import settings
 from ..db import get_session
 from ..ledger import compute_split
 from .transactions import MIN_TRANSACTION_AMOUNT, require_whole_shillings
@@ -28,6 +29,7 @@ class ProductComponent(BaseModel):
     amount: Decimal
     maker_amount: Decimal
     driver_amount: Decimal
+    fund_amount: Decimal = Decimal(0)   # the Conservation fund's 5% (fixed split, migration 0020)
 
 
 class PhotoComponent(BaseModel):
@@ -44,6 +46,19 @@ class CheckoutResponse(BaseModel):
     total_amount: Decimal
     maker_amount: Decimal
     driver_amount: Decimal
+    fund_amount: Decimal = Decimal(0)
+    split_model: str = "legacy"         # 'fixed': 80% creator, 15% site intermediary, 5% fund
+
+
+class ConfigResponse(BaseModel):
+    split_model: str
+
+
+@router.get("/config", response_model=ConfigResponse)
+async def config() -> ConfigResponse:
+    """What the screens need to know about this deployment: the split model, so
+    registration can show "Fixed: 15%" instead of the coordinator-set %."""
+    return ConfigResponse(split_model=settings.split_model)
 
 
 @router.get("/checkout/{producer_id}", response_model=CheckoutResponse)
@@ -193,6 +208,8 @@ class ReceiptResponse(BaseModel):
     product_amount: Decimal | None
     product_maker_amount: Decimal | None
     product_driver_amount: Decimal | None
+    fund_amount: Decimal               # the Conservation fund's share, as stored (0 for legacy)
+    split_model: str
     photo_amount: Decimal | None
     total_amount: Decimal
     stk_receipt: str | None
@@ -234,6 +251,8 @@ async def receipt(transaction_id: str, session: Annotated[AsyncSession, Depends(
         product_amount=row.product_amount,
         product_maker_amount=row.product_maker_amount,
         product_driver_amount=row.product_driver_amount,
+        fund_amount=row.fund_amount,
+        split_model=row.split_model,
         photo_amount=row.photo_amount,
         total_amount=row.total_amount,
         stk_receipt=row.stk_receipt,
