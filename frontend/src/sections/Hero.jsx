@@ -1,7 +1,7 @@
 import { LinkButton, ScrollButton } from "../components/Button"
 import { PAGE_WIDTH } from "../components/Section"
-import hero1717 from "../assets/hero-1717.webp"
-import hero960 from "../assets/hero-960.webp"
+import hero1920 from "../assets/hero-bg-v2-1920.webp"
+import hero960 from "../assets/hero-bg-v2-960.webp"
 
 // The hero's photo: a sunset craft stall with a phone showing the checkout, on the right.
 // An approved exception to the homepage's "no photo in the hero" rule (CLAUDE.md 7.1).
@@ -12,12 +12,12 @@ import hero960 from "../assets/hero-960.webp"
 // top-to-bottom navy gradient so the text up top stays readable and the phone shows below.
 // Below 380px (e.g. 360px phones) the text is a touch smaller and the photo a little lower,
 // so the buttons stay clear of the phone's screen.
-const HERO_SRCSET = `${hero960} 960w, ${hero1717} 1717w`
+const HERO_SRCSET = `${hero960} 960w, ${hero1920} 1920w`
 
 function HeroImage({ className }) {
   return (
     <img
-      src={hero1717}
+      src={hero1920}
       srcSet={HERO_SRCSET}
       sizes="100vw"
       alt=""

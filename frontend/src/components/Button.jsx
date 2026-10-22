@@ -8,7 +8,8 @@ const VARIANTS = {
   outline: "text-sawa-green hover:bg-sawa-green hover:text-white",
   filled: "bg-sawa-green text-white hover:bg-[#164a2f]",
   onDarkFilled: "!border-white bg-white text-[#1B2A41] hover:bg-white/90 focus-visible:!outline-white",
-  onDarkOutline: "!border-white text-white hover:bg-white hover:text-[#1B2A41] focus-visible:!outline-white",
+  // A 65% navy fill keeps its white text ≥ 4.5:1 even where the hero photo behind it is white.
+  onDarkOutline: "!border-white bg-[#1B2A41]/65 text-white hover:bg-white hover:text-[#1B2A41] focus-visible:!outline-white",
 }
 
 export function LinkButton({ href, children, external = false, variant = "outline", className = "" }) {
