@@ -43,10 +43,10 @@ export function cardProps({ site, producerName, driverName, product, photo, tota
       note: service ? "Photography included" : null,
       breakdown: driverName
         ? [
-            { label: `Maker · ${producerName}`, amount: product.maker_amount, highlight: true },
-            { label: `Guide · ${driverName}`, amount: product.driver_amount },
+            { label: `Creator · ${producerName}`, amount: product.maker_amount, highlight: true },
+            { label: `Intermediary · ${driverName}`, amount: product.driver_amount },
           ]
-        : [{ label: `Maker · ${producerName}`, amount: product.amount, highlight: true }],
+        : [{ label: `Creator · ${producerName}`, amount: product.amount, highlight: true }],
     })
   }
   if (photo) {
@@ -54,7 +54,7 @@ export function cardProps({ site, producerName, driverName, product, photo, tota
       key: "photo",
       label: "Photo consent",
       amount: photo.amount,
-      breakdown: [{ label: "Maker — not split", amount: photo.amount, highlight: true }],
+      breakdown: [{ label: "Creator — not split", amount: photo.amount, highlight: true }],
     })
   }
   return { site: [site, producerName].filter(Boolean).join(" · "), components, total }

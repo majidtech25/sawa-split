@@ -9,6 +9,7 @@ import {
   Compass,
   Hand,
   Laptop,
+  Leaf,
   QrCode,
   ScanLine,
   Smartphone,
@@ -29,6 +30,9 @@ import { ksh } from "../lib/format"
 const SALE = { maker: "Wanjiru Beadwork", makerFirst: "Wanjiru", site: "Talek gate", item: "Beaded necklace", amount: 700, photo: 10, pct: 30 }
 const GUIDE = { name: "James", type: "Driver", code: "JAMES", group: 4 }
 const THRESHOLD = 500
+// The roadmap's 5% conservation contribution, previewed on the last step only (not built):
+// rounded up to whole shillings, on top of the price. 5% of 710 = 35.5, so 36.
+const CONSERVATION_EXAMPLE = Math.ceil(((SALE.amount + SALE.photo) * 5) / 100)
 // "Find a verified guide near you" is the next step on the roadmap (SCOPE_V2 MUST 19):
 // shown here as a static preview, not built. No ratings, map or reviews.
 const NEARBY = [
@@ -54,7 +58,7 @@ const STEPS = [
     label: "Register",
     screen: COORDINATOR,
     explain: () =>
-      "A coordinator registers every maker and guide in person; there's no public sign-up. Wanjiru's guide referral is set here at 30%. It can never be more than 40%, so a maker always keeps at least 60% of the agreed price. Each gets a 4-digit PIN, handed over in person.",
+      "A coordinator registers every creator and site intermediary in person; there's no public sign-up. Wanjiru's referral share for site intermediaries is set here at 30%. It can never be more than 40%, so a creator always keeps at least 60% of the agreed price. Each gets a 4-digit PIN, handed over in person.",
   },
   {
     label: "Start tour",
@@ -66,7 +70,7 @@ const STEPS = [
     label: "Tour pass",
     screen: TOURIST,
     explain: () =>
-      "The tourist scans James's QR card and taps \"Use James as my guide today\". The join is counted on James's tour, and the phone remembers James until midnight, so every stall they visit knows who brought them. No account, no app to install.",
+      "The tourist scans James's QR card and taps \"Use James as my site intermediary today\". The join is counted on James's tour, and the phone remembers James until midnight, so every stall they visit knows who brought them. No account, no app to install.",
   },
   {
     label: "New sale",
@@ -94,7 +98,7 @@ const STEPS = [
     label: "Receipt",
     screen: TOURIST,
     explain: () =>
-      "The tourist's receipt shows the same breakdown they saw before paying. Nothing was taken out for Sawa Split: there is no platform fee, ever.",
+      "The tourist's receipt shows the same breakdown they saw before paying. Nothing was taken out for Sawa Split: Sawa Split keeps nothing.",
   },
   {
     label: "Credited",
@@ -116,13 +120,13 @@ const STEPS = [
     label: "Reconcile",
     screen: COORDINATOR,
     explain: () =>
-      "The coordinator sees every shilling. What M-Pesa collected equals exactly what was credited to makers and guides: paid out plus still owed. Platform fee: KSh 0.",
+      "The coordinator sees every shilling. What M-Pesa collected equals exactly what was credited to creators and site intermediaries: paid out plus still owed. Platform fee: KSh 0.",
   },
   {
     label: "Coming next",
     screen: TOURIST,
     explain: () =>
-      "Next on the roadmap: tourists find a coordinator-verified guide near them, and a group checks in with its guide in one scan. Shown here as a preview; it isn't built yet.",
+      "Next on the roadmap: tourists find a coordinator-verified site intermediary near them, and a group checks in with them in one scan. And a 5% conservation contribution, added on top of the price and paid by the tourist, held for a partner conservancy: creators and intermediaries keep their full share. Shown here as a preview; none of it is built yet.",
   },
 ]
 const LAST = STEPS.length
@@ -207,15 +211,15 @@ const linkButton = `${tapTarget} self-start text-left text-sm text-sawa-text-mut
 function Register() {
   return (
     <>
-      <h1 className="text-2xl font-semibold">Register makers and guides</h1>
+      <h1 className="text-2xl font-semibold">Register creators and site intermediaries</h1>
       <Card>
         <p className="flex items-center gap-2 text-sm font-semibold">
-          <Hand aria-hidden="true" className="size-4 text-sawa-green" /> Maker
+          <Hand aria-hidden="true" className="size-4 text-sawa-green" /> Creator
         </p>
         <div className="mt-3 grid gap-3">
           <Filled label="Name" value={SALE.maker} />
           <Filled label="Site" value={SALE.site} />
-          <Filled label="Guide referral (max 40%)" value={`${SALE.pct}%`} mono />
+          <Filled label="Site intermediary referral (max 40%)" value={`${SALE.pct}%`} mono />
           <Filled label="Photo consent fee" value={ksh(SALE.photo)} mono />
         </div>
         <p className="mt-3 text-[13px] text-sawa-text-muted">
@@ -224,7 +228,7 @@ function Register() {
       </Card>
       <Card>
         <p className="flex items-center gap-2 text-sm font-semibold">
-          <Compass aria-hidden="true" className="size-4 text-sawa-green" /> Guide
+          <Compass aria-hidden="true" className="size-4 text-sawa-green" /> Site intermediary
         </p>
         <div className="mt-3 grid gap-3">
           <Filled label="Name" value={GUIDE.name} />
@@ -276,7 +280,7 @@ function TourPass() {
   return (
     <Card>
       <p className="flex items-center gap-2 text-[13px] text-sawa-text-muted">
-        <QrCode aria-hidden="true" className="size-4" /> You scanned your guide's QR. Registered Sawa Split guide
+        <QrCode aria-hidden="true" className="size-4" /> You scanned their QR. Registered Sawa Split site intermediary · driver
       </p>
       <h1 className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xl font-semibold">
         {GUIDE.name} · {GUIDE.type} ·{" "}
@@ -286,7 +290,7 @@ function TourPass() {
       </h1>
       {joined ? (
         <div className="mt-4 flex flex-col gap-2">
-          <Done>{GUIDE.name} is your guide today.</Done>
+          <Done>{GUIDE.name} is your site intermediary today.</Done>
           <p className="text-[13px] text-sawa-text-muted">
             Saved on this phone until midnight. James's tour: 1 of {GUIDE.group} joined. (In this demo nothing is saved.)
           </p>
@@ -297,7 +301,7 @@ function TourPass() {
             James is running a tour today. Joining it means each stall's checkout shows his disclosed share.
           </p>
           <SecondaryButton className="mt-5 w-full" onClick={() => setJoined(true)}>
-            Use James as my guide today
+            Use James as my site intermediary today
           </SecondaryButton>
         </>
       )}
@@ -379,18 +383,18 @@ function ScanStall({ withGuide, answer, card }) {
           <p className="text-[15px]">
             {withGuide ? (
               <span className="inline-flex items-center gap-2 text-sawa-green">
-                <Check aria-hidden="true" className="size-4" /> Guide · {GUIDE.name}
+                <Check aria-hidden="true" className="size-4" /> Intermediary · {GUIDE.name}
               </span>
             ) : (
-              <span className="text-sawa-text-muted">No guide, so {SALE.makerFirst} keeps 100%.</span>
+              <span className="text-sawa-text-muted">No site intermediary, so {SALE.makerFirst} keeps 100%.</span>
             )}
           </p>
           <PriceTransparencyCard {...card} />
           <p className="text-[13px] text-sawa-text-muted">
             {withGuide
-              ? `${GUIDE.name}'s share is the ${SALE.pct}% guide referral the maker agreed with the coordinator, rounded down to whole shillings. `
+              ? `${GUIDE.name}'s share is the ${SALE.pct}% referral share the creator agreed with the coordinator, rounded down to whole shillings. `
               : ""}
-            Photo consent always goes to the maker in full. Nothing is taken out for Sawa Split.
+            Photo consent always goes to the creator in full. Nothing is taken out for Sawa Split.
           </p>
           <button type="button" onClick={() => answer(null)} className={`${linkButton} -mt-3`}>
             Change my answer
@@ -415,7 +419,7 @@ function Pay({ s, withGuide, onPaid }) {
       <StallHeading />
       <Card className="bg-sawa-bg">
         <Row label={SALE.makerFirst} value={ksh(s.maker)} />
-        {withGuide && <Row label={`${GUIDE.name} (guide referral)`} value={ksh(s.guide)} />}
+        {withGuide && <Row label={`Intermediary · ${GUIDE.name}`} value={ksh(s.guide)} />}
         <Row label="Sawa Split" value={ksh(0)} />
         <div className="border-t border-sawa-border">
           <Row label="Total" value={ksh(s.total)} strong />
@@ -565,8 +569,8 @@ function Reconcile({ s }) {
       <Done>Collected = credited = paid out + still owed.</Done>
       {s.guide > 0 && (
         <Card>
-          <p className="text-sm font-semibold">Referrers</p>
-          <Row label={`${GUIDE.code} · ${GUIDE.type} · 1 sale`} value={ksh(s.guide)} />
+          <p className="text-sm font-semibold">Site intermediaries</p>
+          <Row label={`${GUIDE.code} · ${GUIDE.type.toLowerCase()} · 1 sale`} value={ksh(s.guide)} />
         </Card>
       )}
     </>
@@ -582,16 +586,16 @@ function ComingNext() {
       <div className="-mt-3">
         <h1 className="text-2xl font-semibold">Coming next</h1>
         <p className="mt-1 text-[15px] text-sawa-text-muted">
-          Find a verified guide near you, then check in with them in one scan.
+          Find a verified site intermediary near you, then check in with them in one scan. Plus a conservation contribution on top of the price.
         </p>
       </div>
       <div>
-        <h2 className="text-base font-semibold">Verified guides at {SALE.site}</h2>
+        <h2 className="text-base font-semibold">Verified site intermediaries at {SALE.site}</h2>
         <ul className="mt-3 flex flex-col gap-3">
           {NEARBY.map((g) => (
             <li key={g.name} className="rounded-sawa border border-sawa-border bg-sawa-surface p-4">
               <div className="text-[15px] font-semibold text-sawa-text">
-                {g.name} · {g.type}
+                {g.name} · site intermediary · {g.type.toLowerCase()}
               </div>
               <div className="mt-1 inline-flex items-center gap-1 text-[13px] text-sawa-green">
                 <BadgeCheck aria-hidden="true" className="size-4" /> Coordinator-verified
@@ -605,8 +609,28 @@ function ComingNext() {
           <ScanLine aria-hidden="true" className="size-4 text-sawa-green" /> One-scan check-in
         </p>
         <p className="mt-2 text-[13px] text-sawa-text-muted">
-          The group scans their chosen guide's QR once at the start of the day; every stall after that knows who brought
+          The group scans their chosen site intermediary's QR once at the start of the day; every stall after that knows who brought
           them. Still no account and no app.
+        </p>
+      </Card>
+      <Card>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Leaf aria-hidden="true" className="size-4 text-sawa-green" /> 5% conservation contribution
+        </p>
+        <p className="mt-2 text-[13px] text-sawa-text-muted">
+          Added on top, paid by the tourist, its own line on every receipt, held for a partner conservancy. Creators and
+          intermediaries keep their full share.
+        </p>
+        <div className="mt-3 rounded-sawa border border-sawa-border bg-sawa-bg px-4 py-1">
+          <Row label="Beadwork" value={ksh(SALE.amount)} />
+          <Row label="Photo consent" value={ksh(SALE.photo)} />
+          <Row label="Conservation (5%)" value={ksh(CONSERVATION_EXAMPLE)} />
+          <div className="border-t border-sawa-border">
+            <Row label="Total" value={ksh(SALE.amount + SALE.photo + CONSERVATION_EXAMPLE)} strong />
+          </div>
+        </div>
+        <p className="mt-2 text-[13px] text-sawa-text-muted">
+          Wanjiru still gets {ksh(split(true).maker)} and James {ksh(split(true).guide)}, exactly as today.
         </p>
       </Card>
       <div className="border-t border-sawa-border pt-3">

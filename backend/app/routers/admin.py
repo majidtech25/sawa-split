@@ -358,7 +358,7 @@ async def flag_dispute(
     if in_flight is not None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "A payout to this maker or driver is in progress. Flag the dispute once it has finished.",
+            "A payout to this creator or site intermediary is in progress. Flag the dispute once it has finished.",
         )
 
     frozen = await session.execute(

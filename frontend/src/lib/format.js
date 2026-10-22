@@ -30,6 +30,9 @@ export const eatDateTime = (iso) => `${eatDate(iso)}, ${eatTime(iso)}`
 const NEVER_CREDITED = new Set(["failed", "cash_expired", "verifying", "initiated"])
 export const wasCredited = (status) => !NEVER_CREDITED.has(status)
 
-// A referrer's type, as the coordinator set it (SCOPE_V2 MUST 15).
+// A referrer's type, as the coordinator set it (SCOPE_V2 MUST 15). On screen the role is
+// "Site intermediary"; the type is a detail after it ("Site intermediary · driver").
 export const REFERRER_TYPE = { driver: "Driver", tour_guide: "Tour guide", agent: "Agent" }
-export const referrerType = (type) => REFERRER_TYPE[type] || "Guide"
+export const referrerKind = (type) => REFERRER_TYPE[type] || "Site intermediary"
+export const referrerType = (type) =>
+  REFERRER_TYPE[type] ? `Site intermediary · ${REFERRER_TYPE[type].toLowerCase()}` : "Site intermediary"

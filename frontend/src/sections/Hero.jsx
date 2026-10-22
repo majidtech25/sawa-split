@@ -55,11 +55,11 @@ export default function Hero() {
 
       <div className={`${PAGE_WIDTH} pb-10 pt-10 max-[380px]:pt-6 lg:py-24`}>
         <div className="max-w-xl lg:w-[46%] lg:max-w-[620px]">
-          <p className="text-sm font-semibold uppercase tracking-wide text-white/85">Fair pay for Kenya's makers and guides</p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-white/85">Fair pay for Kenya's creators and site intermediaries</p>
           <h1 className="mt-3 text-[2rem] font-semibold leading-tight text-white max-[380px]:text-[1.75rem] sm:text-4xl md:text-5xl">Every shilling has an address.</h1>
           <p className="mt-5 text-base text-white/90 max-[380px]:mt-4 max-[380px]:text-[15px] md:text-lg">
             Tourists scan a stall's QR, see exactly who earns what, and pay by M-Pesa. Sawa Split splits it on the spot.
-            No platform fee.
+            Sawa Split keeps nothing.
           </p>
           <div className="mt-8 flex flex-wrap gap-4 max-[380px]:mt-6 max-[380px]:gap-3">
             <LinkButton href="#/demo" variant="onDarkFilled">

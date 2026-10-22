@@ -147,7 +147,7 @@ function SaleCheckout({ sale, onPaying }) {
   async function pay(method) {
     setSubmitError(null)
     if (codeProblem) {
-      setSubmitError("Remove the guide code to pay without a guide, or fix it.")
+      setSubmitError("Remove the intermediary code to pay without a site intermediary, or fix it.")
       return
     }
     const body = { payment_method: method, referral_code: validCode }
@@ -181,10 +181,10 @@ function SaleCheckout({ sale, onPaying }) {
 
   if (stillWith === null) {
     return (
-      <section aria-label="Your guide" className="flex flex-col gap-3 rounded-sawa border border-sawa-border bg-sawa-surface p-5">
+      <section aria-label="Your site intermediary" className="flex flex-col gap-3 rounded-sawa border border-sawa-border bg-sawa-surface p-5">
         <h2 className="text-lg font-semibold">Still with {pass.firstName || pass.code}?</h2>
         <p className="text-[13px] text-sawa-text-muted">
-          If {pass.firstName || "your guide"} brought you here, they get their disclosed share of this sale.
+          If {pass.firstName || "your site intermediary"} brought you here, they get their disclosed share of this sale.
         </p>
         <div className="flex flex-wrap gap-3">
           <SecondaryButton onClick={() => setStillWith(true)}>Yes, still with {pass.firstName || pass.code}</SecondaryButton>
@@ -201,24 +201,24 @@ function SaleCheckout({ sale, onPaying }) {
       <div className="flex flex-col gap-1.5">
         <Field
           id="guide-code"
-          label="Guide code (optional)"
+          label="Intermediary code (optional)"
           autoComplete="off"
           autoCapitalize="characters"
           placeholder="e.g. JAMES"
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
           error={codeProblem ? quote.referral_error : null}
-          hint={quote?.driver ? null : "If a guide brought you here, their code gives them their disclosed share."}
+          hint={quote?.driver ? null : "If a site intermediary brought you here, their code gives them their disclosed share."}
         />
         {quote?.driver && !codeProblem && (
           <p className="flex items-center gap-2 text-sm text-sawa-green">
-            <Check aria-hidden="true" className="size-4 shrink-0" /> Guide · {quote.driver.name}
+            <Check aria-hidden="true" className="size-4 shrink-0" /> Intermediary · {quote.driver.name}
           </p>
         )}
         {code && (
           <div>
             <button type="button" onClick={() => setCode("")} className="inline-flex min-h-11 items-center text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline">
-              Remove the guide code
+              Remove the intermediary code
             </button>
           </div>
         )}
@@ -234,8 +234,8 @@ function SaleCheckout({ sale, onPaying }) {
       {quote && <PriceTransparencyCard {...cardFromCheckout(quote)} />}
       {quote?.driver && (
         <p className="text-[13px] text-sawa-text-muted">
-          {quote.driver.name}'s share is the {Number(quote.driver_split_pct)}% guide referral the maker agreed with the
-          coordinator, rounded down to whole shillings. Everything else goes to the maker. Nothing is taken out for Sawa
+          {quote.driver.name}'s share is the {Number(quote.driver_split_pct)}% referral share the creator agreed with the
+          coordinator, rounded down to whole shillings. Everything else goes to the creator. Nothing is taken out for Sawa
           Split.
         </p>
       )}

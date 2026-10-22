@@ -181,7 +181,7 @@ contains "blocked: a cash sale waiting for confirmation" "$R" "waiting for confi
 contains "the coordinator's list shows the same blocker" "$(admin_accounts)" "waiting for confirmation"
 post "/transactions/$CASH_ID/confirm" "$DRIVER_TOKEN" >/dev/null
 check "cash sale confirmed by driver + maker" "$(post "/transactions/$CASH_ID/confirm" "$PRODUCER_TOKEN" | json "['status']")" "cash_confirmed"
-contains "blocked: the maker still owes this driver 60" "$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")" "still owed to this driver"
+contains "blocked: the maker still owes this driver 60" "$(post "/admin/closure-requests/$REQ/approve" "$COORD_TOKEN")" "still owed to this site intermediary"
 M_ID=$(mpesa_sale "$PRODUCER_ID" 100 -); need "simulated M-Pesa sale" "$M_ID"; TXN_IDS+=("$M_ID")
 check "a simulated M-Pesa sale settles the debt (driver payable 60)" "$(me "$DRIVER_TOKEN" | json "['payable']")" "60.00"
 post "/admin/transactions/$CASH_ID/dispute" "$COORD_TOKEN" >/dev/null

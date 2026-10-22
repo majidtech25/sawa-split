@@ -31,8 +31,8 @@ export function PriceCardPage() {
             <PriceTransparencyCard {...cardFromCheckout(checkout)} />
             {checkout.driver && (
               <p className="text-[13px] text-sawa-text-muted">
-                {checkout.driver.name} referred this visit. Their fee is the {Number(checkout.driver_split_pct)}% guide
-                referral shown above, disclosed here and checked against their registered QR code.
+                {checkout.driver.name} referred this visit. Their fee is the {Number(checkout.driver_split_pct)}%
+                referral share shown above, disclosed here and checked against their registered QR code.
               </p>
             )}
             <Link

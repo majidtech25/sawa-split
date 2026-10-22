@@ -5,12 +5,12 @@ const phases = [
   {
     name: "Pilot",
     description:
-      "One maker, one driver, one site — at least one real end-to-end transaction, logged and demonstrable.",
+      "One creator, one site intermediary, one site — at least one real end-to-end transaction, logged and demonstrable.",
   },
   {
     name: "Local Scale",
     description:
-      "Toward ten producers and more drivers at one site, on a shared live ledger.",
+      "Toward ten creators and more site intermediaries at one site, on a shared live ledger.",
   },
   {
     name: "Multi-Site",
@@ -19,10 +19,21 @@ const phases = [
   },
 ]
 
+// Shown, not built: the planned conservation contribution (on top of the price, never taken
+// from anyone's share).
+export const CONSERVATION_PREVIEW =
+  "5% conservation contribution — added on top, paid by the tourist, its own line on every receipt, held for a partner conservancy. Creators and intermediaries keep their full share."
+
 const horizons = [
   { name: "Now", live: true, items: ["Transparent split", "M-Pesa + cash", "Tours", "Batched payouts"] },
-  { name: "Next", items: ["Find a verified guide near you"] },
-  { name: "Later", items: ["More sites", "Kiswahili", "Multiple referrers per payment"] },
+  {
+    name: "Next",
+    items: [
+      "Find a verified site intermediary near you",
+      CONSERVATION_PREVIEW,
+    ],
+  },
+  { name: "Later", items: ["More sites", "Kiswahili", "Multiple site intermediaries per payment"] },
 ]
 
 export default function Roadmap() {

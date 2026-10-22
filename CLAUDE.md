@@ -376,6 +376,20 @@ Anything not in `SCOPE_V2.md` needs asking first. The split engine stays maker +
 - **Reconciliation** adds Referrers: sales count and commission per referral code.
 - **Tests:** `backend/scripts/verify_v2.sh` on the test project, using cash and simulated M-Pesa, never STK or B2C.
 
+## 7.3 Glossary: UI terms vs internal names *(2026-10-20)*
+
+What people read on screen (frontend text, user-facing API messages, docs for users) uses the left column. Code, the database, API fields, routes and this brief's rules keep the internal names on the right. Never rename an identifier, column or route to match the UI.
+
+| UI term | Internal name |
+|---|---|
+| Creator (creators) | maker / producer (`producers`, `maker_amount`, `recipient_type = 'maker'`) |
+| Site intermediary (site intermediaries); "Intermediary · <Name>" in tight spots (checkout breakdown, receipts, badges) | driver / guide / agent / referrer (`drivers`, `driver_amount`, `referrer_type`, `/#/driver/<code>`) |
+| The type, as a detail after the role: "Site intermediary · driver / tour guide / agent" | `drivers.referrer_type` (`driver`, `tour_guide`, `agent`) |
+| Intermediary code | `drivers.referral_code` |
+| "Sawa Split keeps nothing." | rule 4 (no platform fee) |
+
+"Still with <Name>?" stays as it is. The pitch-day "Driver" in `DEMO_SCRIPT.md` (the person at the laptop) is a presenter role, not the app role.
+
 ## 8. Build stages — work in this order, commit at each checkpoint
 
 Don't generate the whole app in one pass. Each stage should end in something that runs and is committed before the next stage starts.

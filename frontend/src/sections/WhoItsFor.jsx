@@ -11,21 +11,21 @@ const personas = [
   },
   {
     icon: Hand,
-    name: "Producer (Maker)",
+    name: "Creator",
     blurb:
-      "A woman or PWD artisan, cook, or performer — gets a guaranteed, transparent share with no dependency on a driver handing over cash.",
+      "A woman or PWD artisan, cook, or performer — gets a guaranteed, transparent share with no dependency on a site intermediary handing over cash.",
   },
   {
     icon: Compass,
-    name: "Guides, drivers and agents",
+    name: "Site intermediaries",
     blurb:
-      "Earn a visible, guaranteed commission, including young agents who used to rely on hidden markups.",
+      "Drivers, guides and agents earn a visible, guaranteed commission, including young agents who used to rely on hidden markups.",
   },
   {
     icon: ClipboardCheck,
     name: "Coordinator",
     blurb:
-      "Onboards makers and guides in person, watches the ledger, and resolves disputes.",
+      "Onboards creators and site intermediaries in person, watches the ledger, and resolves disputes.",
   },
 ]
 

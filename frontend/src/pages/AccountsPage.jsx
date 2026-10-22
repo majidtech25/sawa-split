@@ -20,7 +20,7 @@ const ACTION_LABEL = {
   login_locked: "Login locked",
   login_unlocked: "Login unlocked",
 }
-const TYPE_LABEL = { maker: "Maker", driver: "Driver", coordinator: "Coordinator", unknown: "Unregistered phone", ip: "One IP address" }
+const TYPE_LABEL = { maker: "Creator", driver: "Site intermediary", coordinator: "Coordinator", unknown: "Unregistered phone", ip: "One IP address" }
 
 function Th({ children, right = false }) {
   return (
@@ -202,7 +202,7 @@ export default function AccountsPage() {
       </section>
 
       <section className="mt-8">
-        <h2 className="text-lg font-semibold">Makers and drivers</h2>
+        <h2 className="text-lg font-semibold">Creators and site intermediaries</h2>
         <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
           <table className="w-full min-w-[640px] border-collapse">
             <thead>

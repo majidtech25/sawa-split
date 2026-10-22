@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { AlertTriangle, Check } from "lucide-react"
 import { ErrorNote, LiveIndicator, StatusBadge } from "../components/ui"
 import { api } from "../lib/api"
-import { eatDate, eatDateTime, eatTime, ksh, referrerType, wasCredited } from "../lib/format"
+import { eatDate, eatDateTime, eatTime, ksh, referrerKind, wasCredited } from "../lib/format"
 import { useLiveChanges } from "../lib/realtime"
 
 function Tile({ label, value, note, tone = "text-sawa-text" }) {
@@ -49,7 +49,7 @@ const CHECK_LABEL = {
 // What each flagged check means for the money, in a coordinator's terms.
 function checkMeaning(c) {
   if (c.state === "unresolved")
-    return "Nobody is credited. The sale was released after 10 minutes so the maker could carry on. Safaricom is asked again every 15 minutes."
+    return "Nobody is credited. The sale was released after 10 minutes so the creator could carry on. Safaricom is asked again every 15 minutes."
   if (c.state === "paid_late")
     return "Safaricom confirmed it after the sale was released, so it was credited then. Check the tourist didn't pay this sale twice."
   if (c.state === "amount_mismatch") return "The callback was refused and nobody was credited."
@@ -88,7 +88,7 @@ function PaymentChecks({ checks, reload }) {
           <thead>
             <tr>
               <Th>When (EAT)</Th>
-              <Th>Maker</Th>
+              <Th>Creator</Th>
               <Th right>Total</Th>
               <Th>Check</Th>
               <Th>What it means</Th>
@@ -207,8 +207,8 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
         <LiveIndicator live={live} />
       </div>
       <p className="mt-1 text-[15px] text-sawa-text-muted">
-        Every M-Pesa shilling collected is either paid out or still owed to a maker or driver. Cash stays with the
-        maker, so it's shown beside these totals, not in them.
+        Every M-Pesa shilling collected is either paid out or still owed to a creator or site intermediary. Cash
+        stays with the creator, so it's shown beside these totals, not in them.
       </p>
 
       <div className="mt-4">
@@ -224,16 +224,16 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
             <Tile
               label="Still owed"
               value={t.pending}
-              note={Number(t.frozen) > 0 ? `${ksh(t.frozen)} frozen by disputes` : "Makers' and drivers' balances"}
+              note={Number(t.frozen) > 0 ? `${ksh(t.frozen)} frozen by disputes` : "Creators' and site intermediaries' balances"}
             />
           </section>
 
           <section aria-label="Cash" className="mt-3 grid gap-3 md:grid-cols-3">
-            <Tile label="Cash recorded" value={t.cash_recorded} note="Confirmed cash sales. Held by makers, never paid out by M-Pesa." />
+            <Tile label="Cash recorded" value={t.cash_recorded} note="Confirmed cash sales. Held by creators, never paid out by M-Pesa." />
             <Tile
-              label="Owed to drivers"
+              label="Owed to site intermediaries"
               value={t.debts_outstanding}
-              note="Drivers' shares of cash sales, moved from makers' M-Pesa earnings as they come in"
+              note="Site intermediaries' shares of cash sales, moved from creators' M-Pesa earnings as they come in"
             />
           </section>
 
@@ -269,13 +269,13 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
                 <thead>
                   <tr>
                     <Th>When (EAT)</Th>
-                    <Th>Maker</Th>
-                    <Th>Driver</Th>
+                    <Th>Creator</Th>
+                    <Th>Intermediary</Th>
                     <Th>Method</Th>
                     <Th>Status</Th>
                     <Th right>Total</Th>
-                    <Th right>Maker</Th>
-                    <Th right>Driver</Th>
+                    <Th right>Creator</Th>
+                    <Th right>Intermediary</Th>
                     {renderTransactionAction && <Th><span className="sr-only">Action</span></Th>}
                   </tr>
                 </thead>
@@ -315,7 +315,7 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
             <section className="mt-8">
               <h2 className="text-lg font-semibold">Cash debts</h2>
               <p className="mt-1 text-sm text-sawa-text-muted">
-                Each maker owes the driver's share of a referred cash sale. It's settled from the maker's next M-Pesa
+                Each creator owes the site intermediary's share of a referred cash sale. It's settled from the creator's next M-Pesa
                 earnings, never paid out of anyone else's money.
               </p>
               <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
@@ -323,8 +323,8 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
                   <thead>
                     <tr>
                       <Th>Since (EAT)</Th>
-                      <Th>Maker owes</Th>
-                      <Th>Driver</Th>
+                      <Th>Creator owes</Th>
+                      <Th>Intermediary</Th>
                       <Th right>Amount</Th>
                     </tr>
                   </thead>
@@ -348,13 +348,13 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
 
           {data.referrers.length > 0 && (
             <section className="mt-8">
-              <h2 className="text-lg font-semibold">Referrers</h2>
-              <p className="mt-1 text-sm text-sawa-text-muted">Sales each guide or driver referred that went through, and their share.</p>
+              <h2 className="text-lg font-semibold">Site intermediaries</h2>
+              <p className="mt-1 text-sm text-sawa-text-muted">Sales each site intermediary referred that went through, and their share.</p>
               <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
                 <table className="w-full min-w-[480px] border-collapse">
                   <thead>
                     <tr>
-                      <Th>Referrer</Th>
+                      <Th>Intermediary</Th>
                       <Th>Type</Th>
                       <Th>Code</Th>
                       <Th right>Sales</Th>
@@ -365,7 +365,7 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
                     {data.referrers.map((r) => (
                       <tr key={r.referral_code}>
                         <Td>{r.name}</Td>
-                        <Td>{referrerType(r.referrer_type)}</Td>
+                        <Td>{referrerKind(r.referrer_type)}</Td>
                         <Td mono>{r.referral_code}</Td>
                         <Td right mono>{r.sales}</Td>
                         <Td right mono>{ksh(r.commission)}</Td>
@@ -381,13 +381,13 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
             <section className="mt-8">
               <h2 className="text-lg font-semibold">Tours</h2>
               <p className="mt-1 text-sm text-sawa-text-muted">
-                A referral counts only for a tourist who joined the referrer's running tour, so joins can't pass the group size.
+                A referral counts only for a tourist who joined the site intermediary's running tour, so joins can't pass the group size.
               </p>
               <div className="relative mt-3 overflow-x-auto rounded-sawa border border-sawa-border bg-sawa-surface">
                 <table className="w-full min-w-[640px] border-collapse">
                   <thead>
                     <tr>
-                      <Th>Referrer</Th>
+                      <Th>Intermediary</Th>
                       <Th>Date (EAT)</Th>
                       <Th right>Group size</Th>
                       <Th right>Joined</Th>

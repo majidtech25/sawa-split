@@ -48,7 +48,7 @@ export default function CoordinatorPage() {
       >
         <p>{describe}</p>
         <p className="mt-2">
-          The maker's and driver's unpaid shares from this sale are put on hold. They can't be withdrawn or swept until
+          The creator's and site intermediary's unpaid shares from this sale are put on hold. They can't be withdrawn or swept until
           you clear the dispute. Anything already paid out stays paid.
         </p>
       </ConfirmDialog>
@@ -64,7 +64,7 @@ export default function CoordinatorPage() {
         }}
       >
         <p>{describe}</p>
-        <p className="mt-2">The held shares go back to the maker's and driver's available balances.</p>
+        <p className="mt-2">The held shares go back to the creator's and site intermediary's available balances.</p>
       </ConfirmDialog>
 
       <ConfirmDialog

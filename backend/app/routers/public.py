@@ -80,7 +80,7 @@ async def build_checkout(session: AsyncSession, producer_id: str, product, photo
     if producer is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "This stall isn't registered with Sawa Split.")
     if not producer.active:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This maker isn't taking payments through Sawa Split right now.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This creator isn't taking payments through Sawa Split right now.")
 
     driver = None
     if driver_qr:
@@ -88,17 +88,17 @@ async def build_checkout(session: AsyncSession, producer_id: str, product, photo
             await session.execute(text("select id, name, active from drivers where qr_code = :qr"), {"qr": driver_qr})
         ).one_or_none()
         if driver is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "This driver QR code isn't registered.")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "This site intermediary QR code isn't registered.")
         if not driver.active:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This driver isn't active, so the referral can't be recorded.")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This site intermediary isn't active, so the referral can't be recorded.")
 
     if product is None and photo is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "No price was given for the product or photo consent.")
     require_whole_shillings(product, photo)
     if product is not None and not producer.charges_product:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This maker doesn't charge for a product.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This creator doesn't charge for a product.")
     if photo is not None and not producer.charges_photo:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This maker doesn't charge for photo consent.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This creator doesn't charge for photo consent.")
 
     split = compute_split(
         product_amount=product,
@@ -145,7 +145,7 @@ async def verify_driver(
     no phone, Till, earnings, or why an account isn't active."""
     driver = await sales.referrer_by_code(session, qr_code, active_only=False)
     if driver is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "This isn't a registered Sawa Split guide.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This isn't a registered Sawa Split site intermediary.")
     tour = await tours.open_tour(session, driver.id) if driver.active else None
     full = tour is not None and await tours.joined(session, tour.id) >= tour.group_size
     await session.commit()  # keeps a just-closed past tour
@@ -169,7 +169,7 @@ async def join_tour(code: str, session: Annotated[AsyncSession, Depends(get_sess
     reason when there's no tour running or it's full."""
     driver = await sales.referrer_by_code(session, code)
     if driver is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "That guide code isn't registered with Sawa Split.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That intermediary code isn't registered with Sawa Split.")
     try:
         token, tour = await tours.join(session, driver)
     except tours.TourRefused as exc:

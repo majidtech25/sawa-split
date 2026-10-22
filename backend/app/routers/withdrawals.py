@@ -42,7 +42,7 @@ async def request_withdrawal(
     try:
         row = await payouts.start_payout(session, recipient_type, recipient_id)
     except payouts.PayoutRefused as exc:
-        balance_reason = "threshold" in str(exc) or "owed to drivers" in str(exc)
+        balance_reason = "threshold" in str(exc) or "owed to site intermediaries" in str(exc)
         code = status.HTTP_422_UNPROCESSABLE_ENTITY if balance_reason else status.HTTP_409_CONFLICT
         raise HTTPException(code, str(exc)) from exc
 

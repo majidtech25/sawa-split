@@ -3,7 +3,7 @@
 **Status:** Locked for the pitch. This is the physical, click-by-click choreography behind the "live demo" beat already written into `Sawa_Split_Pitch_Script.pdf`'s Section 3 (Solution, 2–2.5 min). Read alongside that script, not instead of it — this file is the mechanics, the pitch script is the words.
 
 > **Every live STK Push costs real money.** Confirmed during stage 5: a sandbox STK Push to a real Safaricom number charged real money (KES 60, non-refundable). The demo price here is KSh 110 (product KSh 100 + photo consent KSh 10), so every dry run, rehearsal and live attempt costs the presenter KSh 110.
-> - **Narration must stay accurate.** Say that *the split is recorded and each share is credited to their balance*. Never say or imply that the maker received money: in sandbox, B2C only pays Safaricom's test number, never a real maker's or driver's phone.
+> - **Narration must stay accurate.** Say that *the split is recorded and each share is credited to their balance*. Never say or imply that the creator received money: in sandbox, B2C only pays Safaricom's test number, never a real creator's or site intermediary's phone.
 > - **Prefer the recorded fallback (Section 5) over paid live retries.** If the first live attempt fails, cut to the recording as Section 4 says. Don't pay for a second attempt on stage.
 
 ## 1. Roles
@@ -22,10 +22,10 @@ Rehearse this as a duet, not a solo with an assistant — the driver's judgment 
   - Payment entry: `https://sawa-split.onrender.com/#/pay/2cfa6cbd-4b61-4f71-a632-907f511be41f/checkout?product=100&photo=10&driver=QR-DRIVER-001&sig=906b04a97b5e2debdcb88fa8ff77b028151690632037b31eb30c6251b09799d7`
   - Price card first (the homepage's "See it work" button): `https://sawa-split.onrender.com/#/pay/2cfa6cbd-4b61-4f71-a632-907f511be41f?product=100&photo=10&driver=QR-DRIVER-001&sig=906b04a97b5e2debdcb88fa8ff77b028151690632037b31eb30c6251b09799d7`
   - Price-card links are signed with the backend's `CHECKOUT_LINK_SECRET`, so this link only works against an API using the same secret it was signed with. If the secret, producer, prices or driver change, make a new link from the coordinator's Price cards screen. Changing any value in the link by hand makes the card show "This price card isn't valid — ask the seller for a new one."
-  - The price-transparency card shows the two locked components separately: Product KSh 100 (maker KSh 70, driver referral KSh 30), Photo consent KSh 10 (maker only), Total KSh 110. These are the demo producer's real configured split (30% driver), so the card shows exactly what the STK Push charges and the ledger records.
+  - The price-transparency card shows the two locked components separately: Product KSh 100 (Creator · Wanjiru KSh 70, Intermediary · James KSh 30), Photo consent KSh 10 (creator only), Total KSh 110. These are the demo creator's real configured split (30% to the site intermediary), so the card shows exactly what the STK Push charges and the ledger records.
 - **Tab 2:** coordinator reconciliation/dashboard view, already logged in, ledger table visible without scrolling.
 - **v2 flow props (SCOPE_V2):** James's referral QR (his dashboard → "Show full screen", or the printed QR-DRIVER-001 card, which still works) and Wanjiru's printed stand QR (her dashboard → "Print my stand QR", opens `#/stand/WANJIRU`). Wanjiru's dashboard open on a second device for "New sale".
-- **Start the tour before every demo (v2 flow).** Since tours (SCOPE_V2 MUST 17), a guide code earns a referral only for a tourist who joined that guide's running tour. Log in as James (and Hassan, if he's in the demo) → dashboard → **Start tour**, group size = how many tourist phones the demo uses (1–30). A tour ends at midnight EAT, so start it again on each demo day. Without one, the checkout says "James isn't running a tour right now" and the sale pays the maker 100%. If the demo is re-run, tap **End tour** and start a fresh one so joins from the last run don't fill it. The v1 signed card (Tab 1) doesn't need a tour: its driver is part of the signed card.
+- **Start the tour before every demo (v2 flow).** Since tours (SCOPE_V2 MUST 17), an intermediary code earns a referral only for a tourist who joined that site intermediary's running tour. Log in as James (and Hassan, if he's in the demo) → dashboard → **Start tour**, group size = how many tourist phones the demo uses (1–30). A tour ends at midnight EAT, so start it again on each demo day. Without one, the checkout says "James isn't running a tour right now" and the sale pays the creator 100%. If the demo is re-run, tap **End tour** and start a fresh one so joins from the last run don't fill it. The v1 signed card (Tab 1) doesn't need a tour: its site intermediary is part of the signed card.
 - **Tab 3 (hidden until needed):** the backup screen recording, cued to 0:00, paused, audio level checked.
 - Presenter's own Safaricom phone: charged, on vibrate (the buzz is part of the moment — don't mute it), M-Pesa PIN known cold. Confirm in a dry run *before* the event that this exact number is registered and receiving Daraja sandbox STK prompts reliably.
 - Confirm venue connectivity in advance, not day-of. Bring a personal hotspot as the primary connection and venue WiFi as the fallback (or the reverse, whichever tested more reliably) — both tested ahead of time, not assumed.
@@ -38,8 +38,8 @@ Keyed to the pitch script's own stage directions in Section 3.
 2. Driver switches to **Tab 1** (already loaded — no navigating live).
 3. Driver clicks the phone number field, types the presenter's number, taps **Pay KSh 110**.
 4. Presenter's phone buzzes (~2–4 sec). Presenter picks it up, enters their M-Pesa PIN — no need to hide this from the room, a PIN pad isn't sensitive to show, but keep the phone screen angled naturally away from the camera out of habit.
-5. Driver stays on Tab 1 until the confirmation screen lands — shown as the two separate component breakdowns (Product: maker/driver split; Photo consent: maker only), holds 2 seconds.
-6. Driver switches to **Tab 2** — the new row appears via Supabase Realtime, status flips pending → confirmed, the split is visible: maker's product share, driver referral, and the separate photo-consent line to the maker.
+5. Driver stays on Tab 1 until the confirmation screen lands — shown as the two separate component breakdowns (Product: creator/intermediary split; Photo consent: creator only), holds 2 seconds.
+6. Driver switches to **Tab 2** — the new row appears via Supabase Realtime, status flips pending → confirmed, the split is visible: the creator's product share, the intermediary's referral, and the separate photo-consent line to the creator.
 7. **Pause. No narration over this moment** — the pitch script calls this out explicitly; let the ledger update speak for itself.
 8. Presenter: *"That transaction you just watched — the split is recorded and each share is credited to their balance. No one had to take our word for it."*
 
@@ -48,11 +48,11 @@ Keyed to the pitch script's own stage directions in Section 3.
 Each beat is tagged with the matching step of the `/#/demo` walkthrough (section 3b), so the live run and the walkthrough can be shown side by side.
 
 0. *(demo step 2)* **James's dashboard → Start tour** (see section 2), done before judges sit down. The card shows "0 of N joined".
-1. *(demo step 3)* Tourist phone scans James's referral QR → "James · Driver · Active" → tap **Use James as my guide today**. The join is counted on the server (James's card: "1 of N joined") and the phone keeps it until midnight EAT.
+1. *(demo step 3)* Tourist phone scans James's referral QR → "Registered Sawa Split site intermediary · driver", "James · Active" → tap **Use James as my site intermediary today**. The join is counted on the server (James's card: "1 of N joined") and the phone keeps it until midnight EAT.
 2. *(demo step 4)* Wanjiru's dashboard → **New sale**: agreed amount (whole KSh, numeric keypad), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for the tourist to pay*.
-3. *(demo step 5)* Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes, still with James**. The sale appears with **Guide code JAMES** filled in and "Guide · James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly. ("No, not with James" removes James and clears the tour pass: Wanjiru gets 100%.)
-4. *(demo steps 6–7)* Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash. For cash, the tourist sees *Waiting for the seller and guide to confirm*. Wanjiru confirms in her sale card ("Cash received? Confirm sale. Your share: KSh X"), and James confirms on his dashboard ("Confirm this sale. You earn KSh Y"). Only then does the tourist's receipt say *Cash payment confirmed*.
-5. *(demo steps 8 and 10)* Coordinator Tab 2: the sale and the split, plus Referrers (JAMES, Driver: sales and commission) and Tours (James: group size, joined, sales, commission) update.
+3. *(demo step 5)* Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes, still with James**. The sale appears with **Intermediary code JAMES** filled in and "Intermediary · James". The breakdown comes from the server: James gets 30% of the agreed amount, rounded down to whole shillings; Wanjiru gets the rest plus the photo fee; total adds up exactly. ("No, not with James" removes James and clears the tour pass: Wanjiru gets 100%.)
+4. *(demo steps 6–7)* Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash. For cash, the tourist sees *Waiting for the seller and site intermediary to confirm*. Wanjiru confirms in her sale card ("Cash received? Confirm sale. Your share: KSh X"), and James confirms on his dashboard ("Confirm this sale. You earn KSh Y"). Only then does the tourist's receipt say *Cash payment confirmed*.
+5. *(demo steps 8 and 10)* Coordinator Tab 2: the sale and the split, plus Site intermediaries (JAMES, Driver: sales and commission) and Tours (James: group size, joined, sales, commission) update.
 6. Paying the same sale again, or an expired or cancelled one, is refused with a plain message. A full tour refuses another join ("James's tour is full"), and that tourist pays with no referral.
 
 ## 3b. The walkthrough at `/#/demo` (no API, no payment)
@@ -61,7 +61,7 @@ A click-through of one sale with sample data, entirely in the browser: it calls 
 
 | Step | Screen | What it shows |
 |---|---|---|
-| 1 | Coordinator | Registers Wanjiru (maker, 30% guide referral, KSh 10 photo fee) and James (guide) in person, each with a PIN |
+| 1 | Coordinator | Registers Wanjiru (creator, 30% referral share, KSh 10 photo fee) and James (site intermediary · driver) in person, each with a PIN |
 | 2 | James | Starts a tour for a group of 4 |
 | 3 | Tourist | Scans James's QR: tour pass for the day |
 | 4 | Wanjiru | New sale: KSh 700, photo consent on (+KSh 10) |
@@ -70,8 +70,8 @@ A click-through of one sale with sample data, entirely in the browser: it calls 
 | 7 | Tourist | Receipt |
 | 8 | Wanjiru, James | Split credited: Wanjiru KSh 500, James KSh 210 (No path: Wanjiru KSh 710) |
 | 9 | Wanjiru | Payouts: KSh 500 threshold or the 18:00 sweep; Wanjiru withdraws (simulated) |
-| 10 | Coordinator | Reconciliation: collected = credited, platform fee KSh 0 |
-| 11 | Tourist | Coming next: find a verified guide, one-scan check-in (preview, not built) |
+| 10 | Coordinator | Reconciliation: collected = credited; Sawa Split keeps nothing |
+| 11 | Tourist | Coming next: find a verified site intermediary, one-scan check-in, 5% conservation contribution on top (preview, not built) |
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 

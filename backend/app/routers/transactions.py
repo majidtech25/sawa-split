@@ -230,14 +230,14 @@ async def initiate_transaction(
         )
     ).one_or_none()
     if producer is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Producer not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Creator not found")
     if not producer.active:
         # CLAUDE.md rule 8: rejected at scan time, before payment initiation.
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Producer is inactive")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Creator is inactive")
     if body.product_enabled and not producer.charges_product:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This producer does not charge for product.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This creator does not charge for product.")
     if body.photo_enabled and not producer.charges_photo:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This producer does not charge for photo consent.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This creator does not charge for photo consent.")
 
     require_whole_shillings(body.product_amount, body.photo_amount)
 
@@ -247,9 +247,9 @@ async def initiate_transaction(
             await session.execute(text("select active, qr_code from drivers where id = :id"), {"id": body.driver_id})
         ).one_or_none()
         if driver is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Site intermediary not found")
         if not driver.active:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Driver is inactive")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Site intermediary is inactive")
         driver_qr = driver.qr_code
 
     if not links.is_valid(
@@ -364,7 +364,7 @@ async def confirm_cash(
         if row.driver_id is not None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                "This transaction has a driver referral (Case A) — tourist confirmation doesn't apply.",
+                "This transaction has a site intermediary referral (Case A) — tourist confirmation doesn't apply.",
             )
         stored = (
             await session.execute(

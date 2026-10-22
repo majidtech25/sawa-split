@@ -112,9 +112,9 @@ async def closure_blockers(session: AsyncSession, party_type: str, party_id) -> 
     if r.debt > 0:
         debt = f"KSh {r.debt:,.0f}" if r.debt == r.debt.to_integral_value() else f"KSh {r.debt:,.2f}"
         blockers.append(
-            f"{debt} from cash sales is still owed to drivers."
+            f"{debt} from cash sales is still owed to site intermediaries."
             if party_type == "maker"
-            else f"{debt} from cash sales is still owed to this driver by makers."
+            else f"{debt} from cash sales is still owed to this site intermediary by creators."
         )
     return blockers
 

@@ -103,7 +103,7 @@ async def start_payout(session: AsyncSession, recipient_type: str, recipient_id,
         reason = (
             f"Payable balance (KES {balance}) is below the KES {minimum} withdrawal threshold."
             if balance > 0 or not owed
-            else f"KES {owed} from cash sales is still owed to drivers, and is paid from your M-Pesa earnings first."
+            else f"KES {owed} from cash sales is still owed to site intermediaries, and is paid from your M-Pesa earnings first."
         )
         raise PayoutRefused(reason)
     row, initiated = await _initiate(session, recipient_type, recipient_id, balance)

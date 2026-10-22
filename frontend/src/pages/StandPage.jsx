@@ -43,7 +43,7 @@ export default function StandPage() {
         <img src={qr} alt={`QR code for ${stall.maker.name}'s stall`} className="w-full max-w-[360px] rounded-sawa border border-sawa-border" />
         <p className="text-xl font-semibold">Scan to pay</p>
         <p className="max-w-[360px] text-[15px] text-sawa-text-muted">
-          See exactly where every shilling goes before you pay: to the maker, and to your guide if you have one. Nothing to
+          See exactly where every shilling goes before you pay: to the creator, and to your site intermediary if you have one. Nothing to
           Sawa Split.
         </p>
         <p className="font-mono text-sm text-sawa-text-muted">Stall {stall.stall_code}</p>

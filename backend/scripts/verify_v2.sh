@@ -186,7 +186,7 @@ check "with JAMES (30%): referrer 300, maker 700 + photo 10, total 1010, first n
 QN=$(body_of "$(call GET "/public/sales/$S1_ID")")
 check "no code: maker 100% (1010), referrer 0" "$(echo "$QN" | json "['maker_amount']") $(echo "$QN" | json "['driver_amount']") $(echo "$QN" | json "['driver']")" "1010 0 None"
 QX=$(body_of "$(call GET "/public/sales/$S1_ID?ref=NOBODY9")")
-check "an unknown code is reported, not applied" "$(echo "$QX" | json "['referral_error']" | cut -c1-30) $(echo "$QX" | json "['maker_amount']")" "That guide code isn't register 1010"
+check "an unknown code is reported, not applied" "$(echo "$QX" | json "['referral_error']" | cut -c1-30) $(echo "$QX" | json "['maker_amount']")" "That intermediary code isn't r 1010"
 
 echo
 echo "== Test 4: cash with a code (Case A); one payment at a time; paid can't be paid again =="

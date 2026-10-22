@@ -92,7 +92,7 @@ export default function LoginPage() {
       </div>
       <div className="mt-5 rounded-sawa border border-sawa-green bg-sawa-surface p-5 text-center">
         <p className="text-[13px] text-sawa-text-muted">
-          Not registered yet? Makers, guides and drivers are registered in person by a site coordinator.
+          Not registered yet? Creators and site intermediaries are registered in person by a site coordinator.
         </p>
         <ContactLink />
       </div>

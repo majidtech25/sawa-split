@@ -81,7 +81,7 @@ function nextStep(row, role) {
   if (row.status !== "cash_unconfirmed") return null
   if (role === "producer") {
     if (!row.maker_confirmed_at) return "Waiting for you to confirm"
-    return row.driver_id ? "Waiting for the guide to confirm" : "Waiting for the tourist to confirm"
+    return row.driver_id ? "Waiting for the site intermediary to confirm" : "Waiting for the tourist to confirm"
   }
   return row.driver_confirmed_at ? "Waiting for the seller to confirm" : "Waiting for you to confirm"
 }
@@ -120,7 +120,7 @@ function WithdrawPanel({ available, owedToDrivers, withdrawals, onWithdrawn }) {
 
   let label = `Withdraw ${ksh(available)}`
   if (belowThreshold) label = `Withdraw unlocks at ${ksh(WITHDRAW_THRESHOLD)} (you have ${ksh(available)})`
-  if (belowThreshold && owedToDrivers > 0) label = `Withdraw unlocks once guides are paid`
+  if (belowThreshold && owedToDrivers > 0) label = `Withdraw unlocks once site intermediaries are paid`
   if (inFlight) label = `Paying out ${ksh(latest.amount)}…`
   if (busy) label = "Starting your payout…"
 
@@ -301,7 +301,7 @@ export default function DashboardPage() {
       <div className="flex items-baseline justify-between gap-2">
         <div>
           <h1 className="text-lg font-semibold">{data.name}</h1>
-          <p className="text-[13px] text-sawa-text-muted">{isMaker ? data.site || "Maker" : referrerType(data.referrerType)}</p>
+          <p className="text-[13px] text-sawa-text-muted">{isMaker ? data.site || "Creator" : referrerType(data.referrerType)}</p>
         </div>
         <LiveIndicator live={live} />
       </div>
@@ -311,7 +311,7 @@ export default function DashboardPage() {
         <section aria-label="Summary" className="grid grid-cols-2 gap-2">
           <SummaryTile label="Today's sales" value={ksh(data.todayTotal)} note={`${data.todaySales} ${data.todaySales === 1 ? "sale" : "sales"}`} />
           <SummaryTile label="Cash in hand" value={ksh(data.cashHeld)} note="From cash sales" />
-          <SummaryTile label="Owed to guides" value={ksh(data.owedToDrivers)} note="Paid from your M-Pesa first" />
+          <SummaryTile label="Owed to site intermediaries" value={ksh(data.owedToDrivers)} note="Paid from your M-Pesa first" />
           <SummaryTile label="Available to withdraw" value={ksh(data.payable)} />
         </section>
       ) : (
@@ -337,14 +337,14 @@ export default function DashboardPage() {
       <section aria-label="Balance details" className="flex flex-col gap-1">
         {data.owedToDrivers > 0 && (
           <p className="text-[13px] text-sawa-text-muted">
-            You owe guides <span className="font-mono text-sawa-text">{ksh(data.owedToDrivers)}</span> from cash sales. It's
+            You owe site intermediaries <span className="font-mono text-sawa-text">{ksh(data.owedToDrivers)}</span> from cash sales. It's
             paid from your M-Pesa earnings first
             {data.available > 0 && <> (you have <span className="font-mono">{ksh(data.available)}</span> toward it)</>}.
           </p>
         )}
         {data.owedByMakers > 0 && (
           <p className="text-[13px] text-sawa-text-muted">
-            Makers owe you <span className="font-mono text-sawa-text">{ksh(data.owedByMakers)}</span> from cash sales. It
+            Creators owe you <span className="font-mono text-sawa-text">{ksh(data.owedByMakers)}</span> from cash sales. It
             reaches your balance as soon as they earn it by M-Pesa.
           </p>
         )}

@@ -37,4 +37,4 @@ async def resolve_producer_or_driver(
                 raise HTTPException(status.HTTP_403_FORBIDDEN, refusal)
             return role, str(row.id)
 
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is not a registered producer or driver")
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is not a registered creator or site intermediary")

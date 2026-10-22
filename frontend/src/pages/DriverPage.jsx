@@ -51,14 +51,14 @@ export default function DriverPage() {
   return (
     <Screen>
       <section aria-live="polite" className="mt-8 rounded-sawa border border-sawa-border bg-sawa-surface p-6">
-        {state.status === "loading" && <p className="text-[15px] text-sawa-text-muted">Checking this guide…</p>}
+        {state.status === "loading" && <p className="text-[15px] text-sawa-text-muted">Checking this site intermediary…</p>}
         {state.status === "registered" && (
           <>
-            <p className="text-[13px] text-sawa-text-muted">Registered Sawa Split guide</p>
+            <p className="text-[13px] text-sawa-text-muted">Registered Sawa Split {referrerType(guide.referrer_type).toLowerCase()}</p>
             <h1
               className={`mt-1 inline-flex flex-wrap items-center gap-x-1.5 text-xl font-semibold ${guide.active ? "" : "text-sawa-text-muted"}`}
             >
-              {guide.first_name} · {referrerType(guide.referrer_type)} ·{" "}
+              {guide.first_name} ·{" "}
               {guide.active ? (
                 <span className="inline-flex items-center gap-1 text-sawa-green">
                   <Check aria-hidden="true" className="size-5" /> Active
@@ -72,7 +72,7 @@ export default function DriverPage() {
 
             {!guide.active && (
               <p className="mt-4 text-[15px] text-sawa-text-muted">
-                {guide.first_name} can't take referrals right now. You can still pay at any stall; the maker gets it all.
+                {guide.first_name} can't take referrals right now. You can still pay at any stall; the creator gets it all.
               </p>
             )}
 
@@ -86,7 +86,7 @@ export default function DriverPage() {
                   {joinedHere ? (
                     <>
                       <p className="flex items-center gap-2 text-[15px] font-semibold text-sawa-green">
-                        <Check aria-hidden="true" className="size-4 shrink-0" /> {guide.first_name} is your guide today
+                        <Check aria-hidden="true" className="size-4 shrink-0" /> {guide.first_name} is your site intermediary today
                       </p>
                       <p className="mt-1 text-[13px] text-sawa-text-muted">
                         Each stall's checkout asks if you're still with {guide.first_name}, until midnight.
@@ -99,22 +99,22 @@ export default function DriverPage() {
                         }}
                         className="inline-flex min-h-11 items-center text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline"
                       >
-                        Stop using {guide.first_name} as my guide
+                        Stop using {guide.first_name} as my site intermediary
                       </button>
                     </>
                   ) : guide.tour_running && !guide.tour_full ? (
                     <>
                       <SecondaryButton className="w-full" onClick={() => join(guide)} disabled={joining}>
-                        {joining ? "Joining…" : `Use ${guide.first_name} as my guide today`}
+                        {joining ? "Joining…" : `Use ${guide.first_name} as my site intermediary today`}
                       </SecondaryButton>
                       {pass?.code && pass.code !== guide.referral_code && (
-                        <p className="mt-2 text-[13px] text-sawa-text-muted">This replaces {pass.firstName || pass.code} as your guide.</p>
+                        <p className="mt-2 text-[13px] text-sawa-text-muted">This replaces {pass.firstName || pass.code} as your site intermediary.</p>
                       )}
                     </>
                   ) : (
                     <p className="text-[15px]">
                       {guide.tour_full ? `${guide.first_name}'s tour is full.` : `${guide.first_name} isn't running a tour right now.`}{" "}
-                      <span className="text-sawa-text-muted">You can still pay at any stall; the maker gets it all.</span>
+                      <span className="text-sawa-text-muted">You can still pay at any stall; the creator gets it all.</span>
                     </p>
                   )}
                   <div className="mt-2">
@@ -129,7 +129,7 @@ export default function DriverPage() {
           <>
             <p className="flex items-center gap-2 text-[15px] font-semibold text-sawa-terracotta">
               <AlertTriangle aria-hidden="true" className="size-5 shrink-0" />
-              This isn't a registered Sawa Split guide
+              This isn't a registered Sawa Split site intermediary
             </p>
             <p className="mt-2 font-mono text-[13px] text-sawa-text-muted">{code}</p>
           </>

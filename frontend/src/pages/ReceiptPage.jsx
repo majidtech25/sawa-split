@@ -31,7 +31,7 @@ function cashNextStep(r) {
   if (r.driver_name) {
     if (!r.maker_confirmed) waiting.push(r.producer_name)
     if (!r.driver_confirmed) waiting.push(r.driver_name)
-    if (waiting.length === 2) return "Waiting for the seller and guide to confirm"
+    if (waiting.length === 2) return "Waiting for the seller and site intermediary to confirm"
   } else {
     if (!r.tourist_confirmed) waiting.push("you")
     if (!r.maker_confirmed) waiting.push(r.tourist_confirmed ? r.producer_name : "the seller")
@@ -195,7 +195,7 @@ export default function ReceiptPage() {
           <ul className="mt-4 flex flex-col gap-1.5">
             <ConfirmStep done={receipt.maker_confirmed}>Seller · {receipt.producer_name}</ConfirmStep>
             {receipt.driver_name ? (
-              <ConfirmStep done={receipt.driver_confirmed}>Guide · {receipt.driver_name}</ConfirmStep>
+              <ConfirmStep done={receipt.driver_confirmed}>Intermediary · {receipt.driver_name}</ConfirmStep>
             ) : (
               <ConfirmStep done={receipt.tourist_confirmed}>You</ConfirmStep>
             )}

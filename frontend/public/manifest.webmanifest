@@ -1,7 +1,7 @@
 {
   "name": "Sawa Split",
   "short_name": "Sawa Split",
-  "description": "Every shilling has an address: see who earns what, pay by M-Pesa, and the payment splits on the spot. No platform fee.",
+  "description": "Every shilling has an address: see who earns what, pay by M-Pesa, and the payment splits on the spot. Sawa Split keeps nothing.",
   "start_url": "/#/",
   "scope": "/",
   "display": "standalone",

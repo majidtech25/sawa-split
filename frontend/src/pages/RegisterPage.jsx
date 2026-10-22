@@ -82,7 +82,7 @@ export default function RegisterPage() {
     if (role === "producer") {
       const split = Number(form.split)
       if (form.split === "" || Number.isNaN(split) || split < 0 || split > 40)
-        e.split = "Between 0 and 40. The maker always keeps at least 60% of the product price."
+        e.split = "Between 0 and 40. The creator always keeps at least 60% of the product price."
       if (!form.product && !form.photo) e.charges = "Pick at least one: product, photo consent, or both."
       if (form.businessType === "service" && (form.photo || form.photoFee !== ""))
         e.photoFee = "A service includes photography in its price: no photo consent or photo fee."
@@ -159,8 +159,8 @@ export default function RegisterPage() {
       <p className="mt-1 text-[15px] text-sawa-text-muted">In person: they leave with their PIN{role === "driver" ? " and QR card" : ""}.</p>
 
       <div role="tablist" aria-label="Who are you registering" className="mt-5 flex overflow-hidden rounded-sawa border border-sawa-border bg-sawa-surface">
-        {tab("producer", "New maker")}
-        {tab("driver", "New guide")}
+        {tab("producer", "New creator")}
+        {tab("driver", "New site intermediary")}
       </div>
 
       {done && (
@@ -220,17 +220,17 @@ export default function RegisterPage() {
               hint={
                 form.businessType === "service"
                   ? "Photography is included free in the price: no photo line, and the whole price is split as usual."
-                  : "Photo consent can be added to a sale as its own line, paid to the maker in full."
+                  : "Photo consent can be added to a sale as its own line, paid to the creator in full."
               }
             />
             <Field
               id="reg-split"
-              label="Guide referral (% of the price)"
+              label="Site intermediary referral (% of the price)"
               inputMode="numeric"
               value={form.split}
               onChange={(e) => set("split")(e.target.value.replace(/[^\d.]/g, ""))}
               error={errors.split}
-              hint="At most 40%. The maker keeps at least 60% of the product price, and all of photo consent."
+              hint="At most 40%. The creator keeps at least 60% of the product price, and all of photo consent."
             />
             <fieldset className="flex flex-col gap-2 border-t border-sawa-border pt-4">
               <legend className="text-[13px] text-sawa-text-muted">Charges for</legend>
@@ -254,7 +254,7 @@ export default function RegisterPage() {
                 value={form.photoFee}
                 onChange={(e) => set("photoFee")(e.target.value.trim())}
                 error={errors.photoFee}
-                hint="Offered on the maker's own sales as a separate photo-consent line, paid to them in full."
+                hint="Offered on the creator's own sales as a separate photo-consent line, paid to them in full."
               />
             )}
           </>
@@ -275,13 +275,13 @@ export default function RegisterPage() {
                   New code
                 </button>
               </div>
-              <p className="text-xs text-sawa-text-muted">Printed on their QR card; it identifies them as the referring guide.</p>
+              <p className="text-xs text-sawa-text-muted">Printed on their QR card; it identifies them as the referring site intermediary.</p>
             </div>
           </>
         )}
 
         <SecondaryButton type="submit" disabled={busy} className="mt-2 w-full">
-          {busy ? "Registering…" : role === "producer" ? "Register maker" : "Register guide"}
+          {busy ? "Registering…" : role === "producer" ? "Register creator" : "Register site intermediary"}
         </SecondaryButton>
         <ErrorNote>{submitError}</ErrorNote>
       </form>

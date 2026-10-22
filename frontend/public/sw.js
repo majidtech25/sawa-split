@@ -5,7 +5,7 @@
 //
 // Hand-written on purpose (no plugin). Change CACHE whenever this file changes, so the
 // new worker clears the old cache on activate.
-const CACHE = "sawa-v1"
+const CACHE = "sawa-v2"
 
 const OFFLINE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline · Sawa Split</title>

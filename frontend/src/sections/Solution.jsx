@@ -11,13 +11,13 @@ const steps = [
     icon: Eye,
     label: "See every share",
     description:
-      "Before paying, the tourist sees who earns what: the maker, the guide who brought them, and photo consent, which always goes to the maker in full.",
+      "Before paying, the tourist sees who earns what: the creator, the site intermediary who brought them, and photo consent, which always goes to the creator in full.",
   },
   {
     icon: Split,
     label: "Pay, and it splits",
     description:
-      "By M-Pesa or cash. Sawa Split splits it at the moment of payment and credits the maker's share. Nothing is taken out for Sawa Split.",
+      "By M-Pesa or cash. Sawa Split splits it at the moment of payment and credits the creator's share. Nothing is taken out for Sawa Split.",
   },
 ]
 

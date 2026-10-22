@@ -103,8 +103,8 @@ export default function Contact() {
         <div>
           <SectionHeading eyebrow="Contact" title="Bring Sawa Split to your market" />
           <p className="mt-3 max-w-xl text-[15px] text-sawa-text-muted">
-            For cooperatives, site coordinators and tourism offices. We'll set up your makers and guides in person, print
-            their stall and guide QR codes, and run a pilot with you.
+            For cooperatives, site coordinators and tourism offices. We'll set up your creators and site intermediaries in
+            person, print their stall and intermediary QR codes, and run a pilot with you.
           </p>
           <div className="mt-8 flex max-w-xl flex-col gap-3">
             <Copyable icon={Mail} label="Email" value={EMAIL} copyLabel="Copy email" />

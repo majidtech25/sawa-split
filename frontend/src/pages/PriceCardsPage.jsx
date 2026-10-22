@@ -50,7 +50,7 @@ export default function PriceCardsPage() {
     setError(null)
     setCard(null)
     if (!producer) {
-      setError("Choose the maker this card is for.")
+      setError("Choose the creator this card is for.")
       return
     }
     const errors = { product: priceError(product), photo: priceError(photo) }
@@ -82,14 +82,14 @@ export default function PriceCardsPage() {
     <Screen>
       <h1 className="text-2xl font-semibold">Price cards</h1>
       <p className="mt-1 text-[15px] text-sawa-text-muted">
-        Make a signed link and QR for a stall. If its prices or driver change, make a new card.
+        Make a signed link and QR for a stall. If its prices or site intermediary change, make a new card.
       </p>
 
       <form onSubmit={generate} className="mt-6 flex flex-col gap-4" noValidate>
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="card-producer" className="text-[13px] text-sawa-text-muted">Maker</label>
+          <label htmlFor="card-producer" className="text-[13px] text-sawa-text-muted">Creator</label>
           <select id="card-producer" className={selectClass} value={producerId} onChange={(e) => setProducerId(e.target.value)}>
-            <option value="">Choose a maker</option>
+            <option value="">Choose a creator</option>
             {producers.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -105,9 +105,9 @@ export default function PriceCardsPage() {
           <Field id="card-photo" label="Photo consent price (KSh)" inputMode="numeric" value={photo} onChange={(e) => setPhoto(e.target.value.trim())} error={priceErrors.photo} />
         )}
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="card-driver" className="text-[13px] text-sawa-text-muted">Referring driver (optional)</label>
+          <label htmlFor="card-driver" className="text-[13px] text-sawa-text-muted">Referring site intermediary (optional)</label>
           <select id="card-driver" className={selectClass} value={driverQr} onChange={(e) => setDriverQr(e.target.value)}>
-            <option value="">No driver: a walk-up card</option>
+            <option value="">No site intermediary: a walk-up card</option>
             {drivers.map((d) => (
               <option key={d.qr_code} value={d.qr_code}>
                 {d.name} ({d.qr_code})

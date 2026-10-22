@@ -33,7 +33,7 @@ class StartTour(BaseModel):
 async def _driver_id(session: AsyncSession, authorization: str | None) -> str:
     role, party_id = await resolve_producer_or_driver(session, authorization)
     if role != "driver":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only a guide or driver runs a tour.")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only a site intermediary runs a tour.")
     return party_id
 
 

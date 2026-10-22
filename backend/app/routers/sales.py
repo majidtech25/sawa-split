@@ -30,7 +30,7 @@ REFUSALS = {
     "cancelled": "The seller cancelled this sale.",
     "paying": "A payment for this sale is already in progress.",
 }
-UNKNOWN_CODE = "That guide code isn't registered with Sawa Split."
+UNKNOWN_CODE = "That intermediary code isn't registered with Sawa Split."
 
 
 def _is_uuid(value: str) -> bool:
@@ -86,7 +86,7 @@ async def stall(stall_code: str, session: Annotated[AsyncSession, Depends(get_se
     if maker is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "This stall isn't registered with Sawa Split.")
     if not maker.active:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This maker isn't taking payments through Sawa Split right now.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This creator isn't taking payments through Sawa Split right now.")
     await sales.expire_due(session, maker.id)
     await session.commit()
     current = (
@@ -192,7 +192,7 @@ async def pay(
     ).one()
     if not maker.active:
         await session.rollback()
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This maker isn't taking payments through Sawa Split right now.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This creator isn't taking payments through Sawa Split right now.")
     referrer, tour = None, None
     if body.referral_code and body.referral_code.strip():
         referrer = await sales.referrer_by_code(session, body.referral_code)
@@ -243,7 +243,7 @@ class MakerSale(SaleView):
 async def _producer_id(session: AsyncSession, authorization: str | None) -> str:
     role, party_id = await resolve_producer_or_driver(session, authorization)
     if role != "producer":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only a maker can do this.")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only a creator can do this.")
     return party_id
 
 

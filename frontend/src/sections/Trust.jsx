@@ -6,17 +6,17 @@ const reasons = [
   {
     icon: CircleSlash,
     name: "No platform fee",
-    blurb: "Every shilling is the maker's or the guide's. Nothing is taken out for Sawa Split, ever.",
+    blurb: "Every shilling is the creator's or the site intermediary's. Nothing is taken out for Sawa Split, ever.",
   },
   {
     icon: FileLock2,
     name: "Prices can't be changed",
-    blurb: "Price cards are signed, so an edited price or guide is refused, and a sale's amount is fixed once the seller enters it.",
+    blurb: "Price cards are signed, so an edited price or site intermediary is refused, and a sale's amount is fixed once the seller enters it.",
   },
   {
     icon: UserCheck,
     name: "Everyone verified in person",
-    blurb: "A coordinator registers every maker and guide face to face. Nobody signs themselves up.",
+    blurb: "A coordinator registers every creator and site intermediary face to face. Nobody signs themselves up.",
   },
   {
     icon: ScrollText,
