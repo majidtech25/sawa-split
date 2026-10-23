@@ -4,7 +4,8 @@
 # `timeout` counts monotonic time, which stops while the host sleeps: on 2026-10-22 a run
 # froze from ~16:00 to 23:33 and resumed long past the agreed 17:30 EAT cutoff, with its
 # database connections dead. This guard watches the real clock instead:
-#   - it refuses to start if the run could still be going at the cutoff (now + limit > cutoff);
+#   - the cutoff is the next HH:MM EAT; it refuses to start between the cutoff and 18:00, or if
+#     the run could still be going at the cutoff (now + limit > cutoff);
 #   - it stops the run (its whole process group) at the cutoff, or once the limit has passed
 #     in wall-clock time, whichever comes first;
 #   - it stops the run if the host slept (the wall clock jumped more than 2 minutes between
@@ -19,8 +20,16 @@ set -uo pipefail
 [ $# -ge 5 ] && [ "$4" = "--" ] || { echo "usage: $0 <HH:MM> <limit s|0> <log> -- <command...>" >&2; exit 2; }
 CUTOFF_HM=$1 LIMIT=$2 LOG=$3
 shift 4
-CUTOFF=$(TZ=Africa/Nairobi date -d "today $CUTOFF_HM" +%s) || exit 2
+# The cutoff is the NEXT HH:MM EAT (tomorrow's once today's has passed), but nothing starts
+# between it and the 18:00 sweep: a run must never overlap 17:30-18:00.
 NOW=$(date +%s)
+CUTOFF=$(TZ=Africa/Nairobi date -d "today $CUTOFF_HM" +%s) || exit 2
+SWEEP=$(TZ=Africa/Nairobi date -d "today 18:00" +%s)
+if [ "$NOW" -ge "$CUTOFF" ] && [ "$NOW" -lt "$SWEEP" ]; then
+  echo "GUARD refused: '$*' would run between $CUTOFF_HM and the 18:00 EAT sweep" | tee -a "$LOG"
+  exit 125
+fi
+[ "$NOW" -ge "$CUTOFF" ] && CUTOFF=$(TZ=Africa/Nairobi date -d "tomorrow $CUTOFF_HM" +%s)
 [ "$LIMIT" = 0 ] && LIMIT=$((CUTOFF - NOW))
 if [ "$NOW" -ge "$CUTOFF" ] || [ $((NOW + LIMIT)) -gt "$CUTOFF" ]; then
   echo "GUARD refused: '$*' could still be running at $CUTOFF_HM EAT (now $(TZ=Africa/Nairobi date +%H:%M), limit ${LIMIT}s)" | tee -a "$LOG"
