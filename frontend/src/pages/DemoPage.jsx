@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useReducer, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
@@ -6,9 +6,14 @@ import {
   BadgeCheck,
   Banknote,
   Check,
+  Clock,
   Compass,
   Hand,
+  Landmark,
   Laptop,
+  Leaf,
+  Minus,
+  Plus,
   QrCode,
   ScanLine,
   Smartphone,
@@ -19,115 +24,186 @@ import PriceTransparencyCard from "../components/PriceTransparencyCard"
 import { PayButton, SecondaryButton, StatusBadge, VerifiedStamp, tapTarget } from "../components/ui"
 import { BRAND_BACKGROUND } from "../lib/brandBackground"
 import { cardProps } from "../lib/checkout"
+import { THRESHOLD, emptyLedger, owed, payable, record, sweep, totals, withdraw } from "../lib/demoLedger"
+import { FUND_PCT, INTERMEDIARY_PCT, split } from "../lib/demoSplit"
 import { ksh } from "../lib/format"
 
-// A walkthrough of one sale from registration to reconciliation, with sample data,
-// entirely in this page: it calls no API (no payment, sale, tour or withdrawal endpoint)
-// and writes nothing to storage (no tour pass). The numbers follow the fixed split
-// (migration 0020): of the agreed price, 15% to the site intermediary and 5% to the
-// Conservation fund, each rounded down, the rest to the maker, plus the photo fee (never
-// split); payouts are full-balance only, from KSh 500. 700 + 10: 570 / 105 / 35.
-const SALE = { maker: "Wanjiru Beadwork", makerFirst: "Wanjiru", site: "Talek gate", item: "Beaded necklace", amount: 700, photo: 10 }
-const REF_PCT = 15
-const FUND_PCT = 5
-const GUIDE = { name: "James", type: "Driver", code: "JAMES", group: 4 }
-const THRESHOLD = 500
-// "Find a verified guide near you" is the next step on the roadmap (SCOPE_V2 MUST 19):
-// shown here as a static preview, not built. No ratings, map or reviews.
-const NEARBY = [
-  { name: "James", type: "Driver" },
-  { name: "Hassan", type: "Agent" },
-]
+// An interactive walkthrough: judges register people, start a tour, set the price, pay
+// by M-Pesa or cash, and watch the money land, settle, pay out and reconcile. Everything
+// lives in this page's memory: it calls no API and writes no storage, and a reload starts
+// over. The split and the ledger follow the live rules (lib/demoSplit.js, lib/demoLedger.js;
+// tested by scripts/test-demo-split.mjs): 1000 -> 800 / 150 / 50, Sawa Split keeps nothing.
+const FUND = "Conservation & sustainability fund"
+const PHOTO_FEE = 10
+const MIN_PRICE = 50
+const MAX_PRICE = 5000
+const UNLOCK = `Withdraw unlocks at ${ksh(THRESHOLD)}. Every evening at 18:00, everyone at ${ksh(THRESHOLD)} or more is paid automatically.`
 
-function split(withGuide) {
-  const guide = withGuide ? Math.floor((SALE.amount * REF_PCT) / 100) : 0
-  const fund = Math.floor((SALE.amount * FUND_PCT) / 100)
-  const product = SALE.amount - guide - fund
-  return { guide, fund, product, maker: product + SALE.photo, total: SALE.amount + SALE.photo }
+const initial = () => ({
+  creator: "Mashujaa Dancers",
+  service: "Cultural dance performance",
+  inter: "Abdi-Majid",
+  interType: "Tour guide",
+  site: "Talek gate",
+  registered: false,
+  group: 5,
+  tourStarted: false,
+  joined: false,
+  price: 1000,
+  product: false, // a service by default: photography included, no photo line
+  photo: true, // the optional photo fee, offered when it's a product
+  saleOpen: false,
+  answer: null, // "Still with <intermediary>?": true / false
+  paidId: null, // this round's sale, once paid
+  sales: [],
+  ledger: emptyLedger(),
+  notice: null, // what the last Withdraw / sweep did
+})
+
+// "Mashujaa Dancers' phone", "Abdi-Majid's phone".
+const poss = (name) => (/s$/i.test(name.trim()) ? `${name}'` : `${name}'s`)
+
+const photoFeeOf = (st) => (st.product && st.photo ? PHOTO_FEE : 0)
+const draftSplit = (st) => split({ price: st.price, photoFee: photoFeeOf(st), withIntermediary: st.answer !== false })
+const validPrice = (p) => Number.isInteger(p) && p >= MIN_PRICE && p <= MAX_PRICE
+
+function pay(st, method) {
+  if (st.paidId) return st
+  const id = st.sales.length + 1
+  const sale = { id, method, price: st.price, photoFee: photoFeeOf(st), withIntermediary: st.answer !== false, product: st.product, split: draftSplit(st) }
+  return { ...st, paidId: id, sales: [...st.sales, sale], ledger: record(st.ledger, sale), notice: null }
+}
+
+function reducer(st, a) {
+  switch (a.type) {
+    case "set":
+      return { ...st, ...a.patch }
+    case "register":
+      return { ...st, registered: true }
+    case "startTour":
+      return { ...st, tourStarted: true }
+    case "join":
+      return { ...st, joined: true }
+    case "openSale":
+      return validPrice(st.price) ? { ...st, saleOpen: true } : st
+    case "answer":
+      return st.paidId ? st : { ...st, answer: a.value }
+    case "pay":
+      return pay(st, a.method)
+    case "withdraw": {
+      const before = st.ledger.payouts.length
+      const ledger = withdraw(st.ledger, a.who)
+      return { ...st, ledger, notice: ledger.payouts.length > before ? { kind: "withdraw", from: before } : st.notice }
+    }
+    case "sweep": {
+      const before = st.ledger.payouts.length
+      return { ...st, ledger: sweep(st.ledger), notice: { kind: "sweep", from: before } }
+    }
+    case "another":
+      return { ...st, saleOpen: false, answer: null, paidId: null, notice: null }
+    case "reset":
+      return initial()
+    // Opening a step directly (?step=N, or Next past an undone step) does the steps
+    // before it with the defaults, so every step can be shown on its own.
+    case "ensure": {
+      let s = st
+      if (a.step > 1) s = { ...s, registered: true }
+      if (a.step > 2) s = { ...s, tourStarted: true }
+      if (a.step > 3) s = { ...s, joined: true }
+      if (a.step > 4 && !s.saleOpen) s = { ...s, saleOpen: true, price: validPrice(s.price) ? s.price : 1000 }
+      if (a.step > 5 && s.answer === null) s = { ...s, answer: true }
+      if (a.step > 6 && !s.paidId) s = pay(s, "mpesa")
+      return s
+    }
+    default:
+      return st
+  }
 }
 
 // Whose screen each step shows.
-const TOURIST = { label: "Tourist's phone", icon: Smartphone }
-const WANJIRU = { label: "Wanjiru's phone", icon: Hand }
-const JAMES = { label: "James's phone", icon: Compass }
-const COORDINATOR = { label: "Coordinator's laptop", icon: Laptop }
+const screens = (st) => ({
+  coordinator: { label: "Coordinator's laptop", icon: Laptop },
+  inter: { label: `${poss(st.inter)} phone`, icon: Compass },
+  tourist: { label: "Tourist's phone", icon: Smartphone },
+  creator: { label: `${poss(st.creator)} phone`, icon: Hand },
+  dashboards: { label: "Everyone's dashboards", icon: Users },
+})
 
-// Each step: its progress label, whose screen it is, and "What's happening" beside it
-// (on phones, above it). The text depends on whether the tourist is still with James.
+// Each step: its progress label, whose screen, and "What's happening" beside it.
 const STEPS = [
   {
     label: "Register",
-    screen: COORDINATOR,
-    explain: () =>
-      "A coordinator registers every creator and site intermediary in person; there's no public sign-up. Every sale splits the same fixed way: 80% creator · 15% site intermediary · 5% conservation — Sawa Split keeps nothing. Each gets a 4-digit PIN, handed over in person.",
+    screen: "coordinator",
+    explain: (st) =>
+      `A coordinator registers every creator and site intermediary in person; there's no public sign-up. Here: ${st.creator} and ${st.inter}. Change the names if you like, then Register. Every sale splits the same fixed way: 80% creator · 15% site intermediary · 5% ${FUND.toLowerCase()}. Sawa Split keeps nothing.`,
   },
   {
     label: "Start tour",
-    screen: JAMES,
-    explain: () =>
-      `James starts today's tour and says how many tourists are with him: ${GUIDE.group}. Only tourists who join his running tour earn him a referral. The tour ends at midnight, and once ${GUIDE.group} have joined, a fifth phone is refused.`,
+    screen: "inter",
+    explain: (st) =>
+      `${st.inter} starts today's tour and says how many tourists are with them. Only tourists who join a running tour earn ${st.inter} a share, and only up to that number: a phone past ${st.group} is refused.`,
   },
   {
     label: "Tour pass",
-    screen: TOURIST,
-    explain: () =>
-      "The tourist scans James's QR card and taps \"Use James as my site intermediary today\". The join is counted on James's tour, and the phone remembers James until midnight, so every stall they visit knows who brought them. No account, no app to install.",
+    screen: "tourist",
+    explain: (st) =>
+      `The tourist scans ${poss(st.inter)} QR card. The phone keeps a tour pass until midnight, so every stall they visit knows who brought them. No account, no app to install.`,
   },
   {
     label: "New sale",
-    screen: WANJIRU,
-    explain: () =>
-      `Wanjiru agrees a price with the tourist and types it on her phone: ${ksh(SALE.amount)}, plus ${ksh(SALE.photo)} photo consent because the tourist wants a photo of her at work. The sale is single-use and expires after 30 minutes.`,
+    screen: "creator",
+    explain: (st) =>
+      `${st.creator} agrees the price with the tourist and types it in (KSh ${MIN_PRICE} to ${MAX_PRICE.toLocaleString("en-KE")} here). A service includes photography; a product can add photo consent (+${ksh(PHOTO_FEE)}), which always goes to the creator in full. The sale is single-use and expires after 30 minutes.`,
   },
   {
     label: "Scan stall",
-    screen: TOURIST,
-    explain: (s, answered) =>
-      answered === null
-        ? `The tourist scans the QR on Wanjiru's stand and sees her sale. First the checkout asks: still with James? Yes gives James his disclosed 15% (${ksh(split(true).guide)}); No means no referral, and Wanjiru gets 95% (${ksh(split(false).maker)} with the photo fee). Either way 5% goes to the Conservation fund.`
-        : s.guide
-        ? `The tourist scans the QR on Wanjiru's stand and confirms they're still with James. The server works out the split before anyone pays: of the ${ksh(SALE.amount)}, James gets 15% (${ksh(s.guide)}), the Conservation fund 5% (${ksh(s.fund)}), and Wanjiru the rest plus the whole photo fee (${ksh(s.maker)}).`
-        : `The tourist scans the QR on Wanjiru's stand. They're no longer with James, so there's no referral and the tour pass is cleared: Wanjiru gets 95% plus the photo fee (${ksh(s.maker)}), the Conservation fund 5% (${ksh(s.fund)}).`,
+    screen: "tourist",
+    explain: (st, s) =>
+      st.answer === null
+        ? `The tourist scans the QR on ${poss(st.creator)} stand. First the checkout asks: still with ${st.inter}? Yes gives ${st.inter} the disclosed 15%; No means no share for anyone but the creator and the fund.`
+        : `The server works out every share before anyone pays, rounded down to whole shillings: ${st.creator} ${ksh(s.creator)}, ${
+            s.intermediary ? `${st.inter} ${ksh(s.intermediary)}, ` : ""
+          }the ${FUND.toLowerCase()} ${ksh(s.fund)}. Switch Yes / No to see it change.`,
   },
   {
     label: "Pay",
-    screen: TOURIST,
-    explain: () =>
-      "The tourist pays the total by M-Pesa: a PIN prompt opens on their own phone, and Safaricom confirms the payment to Sawa Split. Cash works too, but a cash sale only counts once two people have confirmed it.",
+    screen: "tourist",
+    explain: (st) =>
+      `M-Pesa: the tourist confirms on their own phone and Safaricom tells Sawa Split. Cash: the tourist hands the cash to ${st.creator}, and the sale counts only once two people confirm it: ${
+        st.answer === false ? `the tourist and ${st.creator}` : `${st.inter} and ${st.creator}`
+      }.`,
   },
   {
     label: "Receipt",
-    screen: TOURIST,
-    explain: () =>
-      "The tourist's receipt shows the same breakdown they saw before paying. Nothing was taken out for Sawa Split: Sawa Split keeps nothing.",
+    screen: "tourist",
+    explain: () => "The receipt shows the same lines the tourist saw before paying. Nothing was taken out for Sawa Split.",
   },
   {
-    label: "Credited",
-    screen: null, // both dashboards
-    explain: (s) =>
-      s.guide
-        ? `The moment Safaricom confirms, each share is credited: Wanjiru ${ksh(s.maker)}, James ${ksh(s.guide)}, the Conservation fund ${ksh(s.fund)}. Wanjiru and James see it live on their own dashboards. Every entry is written once and never edited.`
-        : `The moment Safaricom confirms, Wanjiru's ${ksh(s.maker)} is credited and shows live on her dashboard, and the Conservation fund's ${ksh(s.fund)} is credited beside it. Every entry is written once and never edited.`,
+    label: "Dashboards",
+    screen: "dashboards",
+    explain: (st) => {
+      const sale = st.sales.find((x) => x.id === st.paidId)
+      return sale?.method === "cash"
+        ? `Cash stays with ${st.creator}, so it's recorded, never paid out again. What ${st.creator} owes from it (15% to ${st.inter}, 5% to the fund) is paid from their next M-Pesa earnings, each debt whole, automatically.`
+        : `The moment Safaricom confirms, every share is credited to its owner. Each entry is written once and never edited.`
+    },
   },
   {
     label: "Payouts",
-    screen: WANJIRU,
-    explain: (s) =>
-      `A balance goes to M-Pesa once it reaches ${ksh(THRESHOLD)}, always in full: on request with Withdraw, or automatically at 18:00 each evening. Wanjiru's ${ksh(s.maker)} qualifies now.${
-        s.guide ? ` James's ${ksh(s.guide)} waits until his balance reaches ${ksh(THRESHOLD)}.` : ""
-      }`,
+    screen: "dashboards",
+    explain: () =>
+      `Balances go to M-Pesa in full, never in part, from ${ksh(THRESHOLD)}: on request, or at the 18:00 sweep, which first settles cash debts. The fund is ring-fenced: never paid out by the payout engine.`,
   },
   {
     label: "Reconcile",
-    screen: COORDINATOR,
+    screen: "coordinator",
     explain: () =>
-      "The coordinator sees every shilling. What M-Pesa collected equals exactly what was credited to creators, site intermediaries and the Conservation fund: paid out plus still owed. The fund is ring-fenced, never paid out with the others. Platform fee: KSh 0.",
+      `The coordinator sees every shilling of every sale this session. What M-Pesa collected equals what creators, site intermediaries and the fund were credited, and equals paid out plus still owed. Cash is shown beside it, never in it. Sawa Split: KSh 0.`,
   },
   {
     label: "Coming next",
-    screen: TOURIST,
-    explain: () =>
-      "Next on the roadmap: tourists find a coordinator-verified site intermediary near them, and a group checks in with them in one scan. Shown here as a preview; none of it is built yet.",
+    screen: "tourist",
+    explain: () => "Next on the roadmap. Shown as a preview; none of it is built yet.",
   },
 ]
 const LAST = STEPS.length
@@ -168,23 +244,11 @@ function Card({ children, className = "" }) {
   return <section className={`rounded-sawa border border-sawa-border bg-sawa-surface p-5 ${className}`}>{children}</section>
 }
 
-// A form field shown already filled in, as it would be on the real screen.
-function Filled({ label, value, mono = false }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-[13px] text-sawa-text-muted">{label}</span>
-      <span className={`rounded-sawa border border-sawa-border bg-sawa-surface px-3 py-2.5 text-[15px] text-sawa-text ${mono ? "font-mono tabular-nums" : ""}`}>
-        {value}
-      </span>
-    </div>
-  )
-}
-
-function Row({ label, value, strong = false }) {
+function Row({ label, value, strong = false, mono = true }) {
   return (
     <div className={`flex items-baseline justify-between gap-4 py-2 text-[15px] ${strong ? "font-semibold" : ""}`}>
       <span>{label}</span>
-      <span className="font-mono tabular-nums">{value}</span>
+      <span className={`whitespace-nowrap ${mono ? "font-mono tabular-nums" : ""}`}>{value}</span>
     </div>
   )
 }
@@ -198,6 +262,679 @@ function Done({ children }) {
   )
 }
 
+function Note({ children, className = "" }) {
+  return <p className={`text-[13px] text-sawa-text-muted ${className}`}>{children}</p>
+}
+
+function Verified() {
+  return (
+    <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-sawa-green">
+      <BadgeCheck aria-hidden="true" className="size-4" /> Coordinator-verified
+    </span>
+  )
+}
+
+function Heading({ who, title }) {
+  return (
+    <div>
+      {who && <p className="text-[13px] text-sawa-text-muted">{who}</p>}
+      <h1 className="mt-1 text-2xl font-semibold">{title}</h1>
+    </div>
+  )
+}
+
+function TextInput({ id, label, value, onChange, disabled }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] text-sawa-text-muted">
+        {label}
+      </label>
+      <input
+        id={id}
+        value={value}
+        disabled={disabled}
+        maxLength={40}
+        onChange={(e) => onChange(e.target.value)}
+        className="min-h-11 rounded-sawa border border-sawa-border bg-sawa-surface px-3 py-2.5 text-[15px] text-sawa-text outline-none focus:border-2 focus:border-sawa-green disabled:bg-sawa-bg"
+      />
+    </div>
+  )
+}
+
+// A balance that counts up from 0 when it appears, then to each new value; instant with
+// reduced motion.
+function CountUp({ value, className = "" }) {
+  const [shown, setShown] = useState(0)
+  const from = useRef(0)
+  useEffect(() => {
+    const start = from.current
+    from.current = value
+    if (start === value || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setShown(value)
+      return undefined
+    }
+    let frame
+    const t0 = performance.now()
+    const tick = (t) => {
+      const k = Math.min((t - t0) / 900, 1)
+      setShown(Math.round(start + (value - start) * (1 - (1 - k) ** 3)))
+      if (k < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [value])
+  return <span className={`font-mono tabular-nums ${className}`}>{ksh(shown)}</span>
+}
+
+const primaryButton =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-sawa border border-sawa-green bg-sawa-green px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#174a2f] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green"
+
+// 1. The coordinator registers the creator and the site intermediary.
+function Register({ st, set, dispatch }) {
+  const locked = st.registered
+  return (
+    <>
+      <Heading who="Coordinator · Register" title="Register a creator and a site intermediary" />
+      <Card>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Hand aria-hidden="true" className="size-4 text-sawa-green" /> Creator
+        </p>
+        <div className="mt-3 grid gap-3">
+          <TextInput id="d-creator" label="Name" value={st.creator} disabled={locked} onChange={(v) => set({ creator: v })} />
+          <TextInput id="d-service" label="What they offer" value={st.service} disabled={locked} onChange={(v) => set({ service: v })} />
+          <TextInput id="d-site" label="Site" value={st.site} disabled={locked} onChange={(v) => set({ site: v })} />
+        </div>
+        <Note className="mt-3">Fixed split: 80% creator · 15% site intermediary · 5% fund.</Note>
+        {locked && <div className="mt-3"><Verified /></div>}
+      </Card>
+      <Card>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Compass aria-hidden="true" className="size-4 text-sawa-green" /> Site intermediary
+        </p>
+        <div className="mt-3 grid gap-3">
+          <TextInput id="d-inter" label="Name" value={st.inter} disabled={locked} onChange={(v) => set({ inter: v })} />
+          <TextInput id="d-type" label="Type" value={st.interType} disabled={locked} onChange={(v) => set({ interType: v })} />
+        </div>
+        {locked && <div className="mt-3"><Verified /></div>}
+      </Card>
+      {locked ? (
+        <Done>Both registered in person, each with a 4-digit PIN.</Done>
+      ) : (
+        <button type="button" className={primaryButton} disabled={!st.creator.trim() || !st.inter.trim()} onClick={() => dispatch({ type: "register" })}>
+          Register
+        </button>
+      )}
+    </>
+  )
+}
+
+// 2. The site intermediary starts today's tour.
+function StartTour({ st, set, dispatch }) {
+  const change = (d) => set({ group: Math.min(30, Math.max(1, st.group + d)) })
+  return (
+    <>
+      <Heading who={`${poss(st.inter)} dashboard`} title="Today's tour" />
+      <Card>
+        {st.tourStarted ? (
+          <div aria-live="polite">
+            <p className="flex items-center gap-2 text-[15px] font-semibold text-sawa-green">
+              <Users aria-hidden="true" className="size-5" /> Tour running
+            </p>
+            <p className="mt-2 font-mono text-2xl font-bold tabular-nums">
+              {st.joined ? 1 : 0} of {st.group} joined
+            </p>
+            <Note className="mt-1">Ends at midnight, or when {st.inter} taps End tour.</Note>
+          </div>
+        ) : (
+          <>
+            <p id="d-group-label" className="text-[15px]">How many tourists are with you today?</p>
+            <div role="group" aria-labelledby="d-group-label" className="mt-3 flex items-center gap-3">
+              <SecondaryButton aria-label="One fewer" disabled={st.group <= 1} onClick={() => change(-1)} className="w-11 px-0">
+                <Minus aria-hidden="true" className="size-4" />
+              </SecondaryButton>
+              <output aria-live="polite" className="w-12 text-center font-mono text-2xl font-bold tabular-nums">
+                {st.group}
+              </output>
+              <SecondaryButton aria-label="One more" disabled={st.group >= 30} onClick={() => change(1)} className="w-11 px-0">
+                <Plus aria-hidden="true" className="size-4" />
+              </SecondaryButton>
+            </div>
+            <button type="button" className={`${primaryButton} mt-5 w-full`} onClick={() => dispatch({ type: "startTour" })}>
+              Start tour
+            </button>
+          </>
+        )}
+      </Card>
+    </>
+  )
+}
+
+// 3. The tourist scans the site intermediary's QR: a tour pass for today.
+function TourPass({ st, dispatch }) {
+  const [scanning, setScanning] = useState(false)
+  useEffect(() => {
+    if (!scanning) return undefined
+    const t = setTimeout(() => {
+      setScanning(false)
+      dispatch({ type: "join" })
+    }, 1400)
+    return () => clearTimeout(t)
+  }, [scanning, dispatch])
+  if (st.joined)
+    return (
+      <Card>
+        <p className="flex items-center gap-2 text-[13px] text-sawa-text-muted">
+          <QrCode aria-hidden="true" className="size-4" /> Tour pass · until midnight
+        </p>
+        <h1 className="mt-1 text-xl font-semibold">
+          {st.inter} · site intermediary · {st.interType.toLowerCase()}
+        </h1>
+        <div className="mt-2">
+          <Verified />
+        </div>
+        <div className="mt-4">
+          <Done>{st.inter} is your site intermediary today.</Done>
+        </div>
+        <Note className="mt-2">
+          {poss(st.inter)} tour: 1 of {st.group} joined. (In this demo nothing is saved on the phone.)
+        </Note>
+      </Card>
+    )
+  return (
+    <>
+      <Heading who="Tourist's camera" title={`Scan ${poss(st.inter)} card`} />
+      <div aria-hidden="true" className="relative mx-auto flex size-48 items-center justify-center overflow-hidden rounded-sawa border-2 border-sawa-text bg-sawa-bg">
+        <QrCode className="size-28 text-sawa-text" strokeWidth={1.25} />
+        {scanning && <span className="demo-scan-line absolute inset-x-2 h-0.5 bg-sawa-green" />}
+      </div>
+      <style>{`.demo-scan-line{animation:demo-scan 1.4s ease-in-out}@keyframes demo-scan{0%{top:8%}50%{top:88%}100%{top:8%}}@media (prefers-reduced-motion:reduce){.demo-scan-line{animation:none;top:50%}}`}</style>
+      <p aria-live="polite" className="text-center text-[15px] text-sawa-text-muted">
+        {scanning ? "Scanning…" : `${st.inter} hands the tourist their QR card.`}
+      </p>
+      <button type="button" className={primaryButton} disabled={scanning} onClick={() => setScanning(true)}>
+        <ScanLine aria-hidden="true" className="size-4" /> Scan {poss(st.inter)} QR
+      </button>
+    </>
+  )
+}
+
+// 4. The creator enters the agreed price.
+function NewSale({ st, set, dispatch }) {
+  const s = draftSplit(st)
+  const ok = validPrice(st.price)
+  if (st.saleOpen)
+    return (
+      <>
+        <Heading who={`${poss(st.creator)} dashboard`} title="New sale" />
+        <Card>
+          <div aria-live="polite">
+            <p className="text-[15px] font-semibold">Waiting for the tourist to pay</p>
+            <p className="mt-2 font-mono text-2xl font-bold tabular-nums">{ksh(s.total)}</p>
+            <Note className="mt-1">
+              {st.product ? "Product" : `${st.service} (photography included)`}, {ksh(st.price)}
+              {s.photoFee ? ` + ${ksh(s.photoFee)} photo consent` : ""}. Expires in 30 minutes.
+            </Note>
+          </div>
+        </Card>
+      </>
+    )
+  return (
+    <>
+      <Heading who={`${poss(st.creator)} dashboard`} title="New sale" />
+      <Card>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="d-price" className="text-[13px] text-sawa-text-muted">
+            Agreed price (KSh)
+          </label>
+          <input
+            id="d-price"
+            type="number"
+            inputMode="numeric"
+            min={MIN_PRICE}
+            max={MAX_PRICE}
+            step={1}
+            value={Number.isNaN(st.price) ? "" : st.price}
+            onChange={(e) => set({ price: e.target.value === "" ? Number.NaN : Number(e.target.value) })}
+            aria-invalid={ok ? undefined : "true"}
+            aria-describedby="d-price-note"
+            className={`min-h-11 rounded-sawa border bg-sawa-surface px-3 py-2.5 font-mono text-[15px] outline-none focus:border-2 focus:border-sawa-green ${ok ? "border-sawa-border" : "border-sawa-terracotta"}`}
+          />
+          <input
+            type="range"
+            aria-label="Agreed price, slider"
+            min={MIN_PRICE}
+            max={MAX_PRICE}
+            step={10}
+            value={ok ? st.price : MIN_PRICE}
+            onChange={(e) => set({ price: Number(e.target.value) })}
+            className="mt-2 h-11 w-full accent-[#1E5B3A]"
+          />
+          <p id="d-price-note" className={`text-xs ${ok ? "text-sawa-text-muted" : "text-sawa-terracotta"}`}>
+            {ok ? `Whole shillings, KSh ${MIN_PRICE}–${MAX_PRICE.toLocaleString("en-KE")}.` : `Enter whole shillings from ${MIN_PRICE} to ${MAX_PRICE.toLocaleString("en-KE")}.`}
+          </p>
+        </div>
+        <label className="mt-4 flex min-h-11 cursor-pointer items-center gap-3 text-[15px]">
+          <input type="checkbox" checked={st.product} onChange={(e) => set({ product: e.target.checked })} className="size-5 accent-[#1E5B3A]" />
+          Product instead of service
+        </label>
+        {st.product ? (
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 pl-8 text-[15px]">
+            <input type="checkbox" checked={st.photo} onChange={(e) => set({ photo: e.target.checked })} className="size-5 accent-[#1E5B3A]" />
+            Photo consent (+{ksh(PHOTO_FEE)}), to the creator in full
+          </label>
+        ) : (
+          <Note>A service: {st.service.toLowerCase()}, photography included.</Note>
+        )}
+        <button type="button" className={`${primaryButton} mt-4 w-full`} disabled={!ok} onClick={() => dispatch({ type: "openSale" })}>
+          Start the sale · {ok ? ksh(s.total) : "—"}
+        </button>
+      </Card>
+    </>
+  )
+}
+
+function card(st, s) {
+  return cardProps({
+    site: st.site,
+    producerName: st.creator,
+    driverName: s.intermediary ? st.inter : null,
+    product: { amount: s.price, maker_amount: s.creatorProduct, driver_amount: s.intermediary, fund_amount: s.fund },
+    photo: s.photoFee ? { amount: s.photoFee } : null,
+    total: s.total,
+    service: !st.product,
+  })
+}
+
+function StallHeading({ st }) {
+  return (
+    <div>
+      <p className="flex items-center gap-2 text-[13px] text-sawa-text-muted">
+        <ScanLine aria-hidden="true" className="size-4" /> You scanned the stall's QR
+      </p>
+      <h1 className="mt-1 text-2xl font-semibold">{st.creator}</h1>
+      <p className="text-[15px] text-sawa-text-muted">
+        {st.site} · {st.product ? "product" : st.service.toLowerCase()}
+      </p>
+      <div className="mt-1">
+        <Verified />
+      </div>
+    </div>
+  )
+}
+
+function Choice({ pressed, onClick, children, disabled }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-sawa border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sawa-green disabled:cursor-not-allowed ${
+        pressed ? "border-sawa-green bg-sawa-green text-white" : "border-sawa-green text-sawa-green hover:bg-sawa-green/10"
+      }`}
+    >
+      {pressed && <Check aria-hidden="true" className="size-4" />}
+      {children}
+    </button>
+  )
+}
+
+// 5. The tourist scans the stall: "Still with ...?" and the live breakdown.
+function ScanStall({ st, dispatch }) {
+  const s = draftSplit(st)
+  return (
+    <>
+      <StallHeading st={st} />
+      <Card>
+        <h2 className="text-lg font-semibold">Still with {st.inter}?</h2>
+        <Note className="mt-1">If {st.inter} brought you here, they get their disclosed 15% of this sale.</Note>
+        <div className="mt-4 flex gap-3">
+          <Choice pressed={st.answer === true} disabled={!!st.paidId} onClick={() => dispatch({ type: "answer", value: true })}>
+            Yes
+          </Choice>
+          <Choice pressed={st.answer === false} disabled={!!st.paidId} onClick={() => dispatch({ type: "answer", value: false })}>
+            No
+          </Choice>
+        </div>
+      </Card>
+      {st.answer !== null && (
+        <div aria-live="polite" className="flex flex-col gap-3">
+          <PriceTransparencyCard {...card(st, s)} />
+          <Note>
+            {s.intermediary ? `${poss(st.inter)} share is the fixed ${INTERMEDIARY_PCT}%, ` : `No site intermediary: ${st.creator} gets 95%, `}
+            the fund {FUND_PCT}%, each rounded down to whole shillings. Sawa Split keeps nothing.
+          </Note>
+        </div>
+      )}
+    </>
+  )
+}
+
+// 6. Pay: M-Pesa (simulated confirm on the phone, never a PIN field) or cash (two confirmations).
+function Pay({ st, dispatch, onPaid }) {
+  const s = draftSplit(st)
+  const [method, setMethod] = useState(null)
+  const [stage, setStage] = useState(0) // M-Pesa: 0 choose, 1 prompt, 2 confirming. Cash: 0, 1 first confirmed.
+  const paid = useRef(onPaid)
+  useEffect(() => {
+    paid.current = onPaid
+  })
+  useEffect(() => {
+    if (method !== "mpesa" || stage !== 2) return undefined
+    const t = setTimeout(() => {
+      dispatch({ type: "pay", method: "mpesa" })
+      paid.current()
+    }, 1400)
+    return () => clearTimeout(t)
+  }, [method, stage, dispatch])
+  const sale = st.sales.find((x) => x.id === st.paidId)
+  if (sale)
+    return (
+      <>
+        <StallHeading st={st} />
+        <Done>Paid by {sale.method === "mpesa" ? "M-Pesa" : "cash"}: {ksh(sale.split.total)}. Next: the receipt.</Done>
+      </>
+    )
+  const first = s.intermediary ? { who: `${poss(st.inter)} phone`, text: `Confirm the cash sale. You earn ${ksh(s.intermediary)}.`, button: `Confirm as ${st.inter}` } : { who: "Tourist's phone", text: `Confirm you paid ${ksh(s.total)} in cash.`, button: "Confirm as the tourist" }
+  return (
+    <>
+      <StallHeading st={st} />
+      <Card className="bg-sawa-bg">
+        <Row label={`Creator · ${st.creator}`} value={ksh(s.creator)} />
+        {s.intermediary > 0 && <Row label={`Intermediary · ${st.inter}`} value={ksh(s.intermediary)} />}
+        <Row label={`${FUND} (${FUND_PCT}%)`} value={ksh(s.fund)} />
+        <Row label="Sawa Split" value={ksh(0)} />
+        <div className="border-t border-sawa-border">
+          <Row label="Total" value={ksh(s.total)} strong />
+        </div>
+      </Card>
+      <div role="group" aria-label="How the tourist pays" className="flex gap-3">
+        <Choice pressed={method === "mpesa"} disabled={stage > 0} onClick={() => setMethod("mpesa")}>
+          <Smartphone aria-hidden="true" className="size-4" /> M-Pesa
+        </Choice>
+        <Choice pressed={method === "cash"} disabled={stage > 0} onClick={() => setMethod("cash")}>
+          <Banknote aria-hidden="true" className="size-4" /> Cash
+        </Choice>
+      </div>
+      {method === "mpesa" && stage === 0 && (
+        <PayButton onClick={() => setStage(1)}>Pay {ksh(s.total)} by M-Pesa (demo)</PayButton>
+      )}
+      {method === "mpesa" && stage >= 1 && (
+        <Card>
+          <p aria-live="polite" className="flex items-center gap-2 text-[13px] text-sawa-text-muted">
+            <Smartphone aria-hidden="true" className="size-4" /> On the tourist's phone (simulated)
+          </p>
+          <p className="mt-2 text-[15px]">
+            Pay <span className="font-mono font-semibold tabular-nums">{ksh(s.total)}</span> to Sawa Split for {st.creator}?
+          </p>
+          <SecondaryButton className="mt-4 w-full" disabled={stage === 2} onClick={() => setStage(2)}>
+            {stage === 2 ? "Waiting for Safaricom…" : "Confirm on phone"}
+          </SecondaryButton>
+          <Note className="mt-2">The real prompt asks for the M-Pesa PIN on the tourist's own phone. This demo never asks for one and sends nothing.</Note>
+        </Card>
+      )}
+      {method === "cash" && (
+        <div aria-live="polite" className="flex flex-col gap-3">
+          <Card>
+            <p className="text-[13px] text-sawa-text-muted">{first.who}</p>
+            <p className="mt-1 text-[15px] font-semibold">{first.text}</p>
+            {stage === 0 ? (
+              <SecondaryButton className="mt-3 w-full" onClick={() => setStage(1)}>
+                {first.button}
+              </SecondaryButton>
+            ) : (
+              <div className="mt-3">
+                <Done>Confirmed.</Done>
+              </div>
+            )}
+          </Card>
+          <Card className={stage === 0 ? "opacity-60" : ""}>
+            <p className="text-[13px] text-sawa-text-muted">{poss(st.creator)} phone</p>
+            <p className="mt-1 text-[15px] font-semibold">Confirm you received {ksh(s.total)} in cash.</p>
+            <SecondaryButton
+              className="mt-3 w-full"
+              disabled={stage === 0}
+              onClick={() => {
+                dispatch({ type: "pay", method: "cash" })
+                onPaid()
+              }}
+            >
+              Confirm as {st.creator}
+            </SecondaryButton>
+          </Card>
+          <Note>Both must confirm within 10 minutes, or the sale expires and nothing is recorded.</Note>
+        </div>
+      )}
+    </>
+  )
+}
+
+// 7. The receipt, every line.
+function Receipt({ st }) {
+  const sale = st.sales.find((x) => x.id === st.paidId)
+  if (!sale) return null
+  const s = sale.split
+  return (
+    <>
+      <section aria-live="polite" className="flex items-center gap-5">
+        <VerifiedStamp amount={s.total} at={new Date().toISOString()} place={st.site} />
+        <div>
+          <StatusBadge status={sale.method === "mpesa" ? "confirmed" : "cash_confirmed"} />
+          <h1 className="mt-2 text-2xl font-semibold">{sale.method === "mpesa" ? "Payment confirmed" : "Cash sale confirmed"}</h1>
+          <p className="mt-1 text-[15px] text-sawa-text-muted">The split is recorded.</p>
+        </div>
+      </section>
+      <PriceTransparencyCard {...card({ ...st, product: sale.product }, s)} />
+      <div className="flex flex-col gap-1 text-[13px] text-sawa-text-muted">
+        <p>
+          Receipt <span className="font-mono text-sawa-text">SS-DEMO{String(sale.id).padStart(4, "0")}</span> (sample)
+        </p>
+        <p>
+          {sale.method === "cash"
+            ? `The cash stays with ${st.creator}; it's never paid out again by M-Pesa.`
+            : "Paid by M-Pesa."}{" "}
+          Nothing was taken out for Sawa Split.
+        </p>
+      </div>
+    </>
+  )
+}
+
+function DebtList({ st, filter }) {
+  const debts = st.ledger.debts.filter(filter)
+  if (!debts.length) return null
+  return (
+    <ul className="mt-3 flex flex-col gap-2">
+      {debts.map((d) => (
+        <li key={d.id} className="flex items-start justify-between gap-3 text-[13px]">
+          <span>
+            Sale {d.saleId} (cash): {d.creditor === "fund" ? `5% to the fund` : `15% to ${st.inter}`}
+          </span>
+          <span className={`whitespace-nowrap font-mono tabular-nums ${d.settled ? "text-sawa-green" : "text-sawa-text"}`}>
+            {ksh(d.amount)} · {d.settled ? "settled" : "owed"}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// 8. Dashboards: balances count up; cash debts and how they settle.
+function Dashboards({ st, dispatch, go }) {
+  const l = st.ledger
+  const outstanding = owed(l)
+  return (
+    <>
+      <Heading title="Dashboards" />
+      <Card>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Hand aria-hidden="true" className="size-4 text-sawa-green" /> {st.creator}
+        </p>
+        <p className="mt-3 text-[13px] text-sawa-text-muted">M-Pesa balance</p>
+        <CountUp value={l.available.creator} className="text-3xl font-bold text-sawa-green" />
+        {l.cashHeld > 0 && (
+          <p className="mt-2 text-[13px] text-sawa-text-muted">
+            Cash received (kept, never paid out again): <CountUp value={l.cashHeld} className="text-sawa-text" />
+          </p>
+        )}
+        {l.debts.length > 0 && (
+          <>
+            <p className="mt-3 text-sm font-semibold">From cash sales, owed: {ksh(outstanding)}</p>
+            <DebtList st={st} filter={() => true} />
+            <Note className="mt-2">
+              Paid automatically from {poss(st.creator)} M-Pesa earnings: each debt whole, as soon as the balance covers it.
+            </Note>
+          </>
+        )}
+      </Card>
+      <Card>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Compass aria-hidden="true" className="size-4 text-sawa-green" /> {st.inter}
+        </p>
+        <p className="mt-3 text-[13px] text-sawa-text-muted">M-Pesa balance</p>
+        <CountUp value={l.available.intermediary} className="text-3xl font-bold text-sawa-green" />
+        {l.debts.some((d) => d.creditor === "intermediary" && !d.settled) && (
+          <Note className="mt-1">
+            Plus {ksh(l.debts.filter((d) => d.creditor === "intermediary" && !d.settled).reduce((a, d) => a + d.amount, 0))} owed by{" "}
+            {st.creator} from cash, on its way.
+          </Note>
+        )}
+      </Card>
+      <Card>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Leaf aria-hidden="true" className="size-4 text-sawa-green" /> {FUND}
+        </p>
+        <p className="mt-3 text-[13px] text-sawa-text-muted">Held</p>
+        <CountUp value={l.available.fund} className="text-3xl font-bold text-sawa-green" />
+        <Note className="mt-1">Ring-fenced — never paid out by the engine.</Note>
+      </Card>
+      {outstanding > 0 && (
+        <SecondaryButton
+          className="w-full"
+          onClick={() => {
+            dispatch({ type: "another" })
+            go(4)
+          }}
+        >
+          Make an M-Pesa sale to see the debts settle
+        </SecondaryButton>
+      )}
+    </>
+  )
+}
+
+// 9. Payouts: Withdraw at KSh 500+, the 18:00 sweep, the fund never.
+function Payouts({ st, dispatch }) {
+  const l = st.ledger
+  const people = [
+    { who: "creator", name: st.creator, icon: Hand },
+    { who: "intermediary", name: st.inter, icon: Compass },
+  ]
+  const fresh = st.notice ? l.payouts.slice(st.notice.from) : []
+  return (
+    <>
+      <Heading title="Payouts" />
+      {people.map(({ who, name, icon: Icon }) => {
+        const p = payable(l, who)
+        return (
+          <Card key={who}>
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <Icon aria-hidden="true" className="size-4 text-sawa-green" /> {name}
+            </p>
+            <p className="mt-3 text-[13px] text-sawa-text-muted">Payable now</p>
+            <CountUp value={p} className="text-3xl font-bold" />
+            {l.paid[who] > 0 && <Note className="mt-1">Paid to M-Pesa so far: {ksh(l.paid[who])}</Note>}
+            {p >= THRESHOLD ? (
+              <SecondaryButton className="mt-3 w-full" onClick={() => dispatch({ type: "withdraw", who })}>
+                <Wallet aria-hidden="true" className="size-4" /> Withdraw {ksh(p)}
+              </SecondaryButton>
+            ) : (
+              <Note className="mt-2">{UNLOCK}</Note>
+            )}
+          </Card>
+        )
+      })}
+      <Card>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Leaf aria-hidden="true" className="size-4 text-sawa-green" /> {FUND}
+        </p>
+        <p className="mt-2 font-mono text-xl font-bold tabular-nums">{ksh(l.available.fund)}</p>
+        <Note className="mt-1">Ring-fenced — never paid out by the engine.</Note>
+      </Card>
+      <SecondaryButton className="w-full" onClick={() => dispatch({ type: "sweep" })}>
+        <Clock aria-hidden="true" className="size-4" /> Run the 18:00 sweep
+      </SecondaryButton>
+      {st.notice && (
+        <div aria-live="polite">
+          {fresh.length ? (
+            <Done>
+              {fresh.map((p) => `${ksh(p.amount)} sent to ${poss(p.who === "creator" ? st.creator : st.inter)} M-Pesa`).join("; ")} (simulated).
+            </Done>
+          ) : (
+            <Note>The sweep ran: nobody is at {ksh(THRESHOLD)} yet, so nothing was paid. Debts it could settle are settled.</Note>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
+// 10. The coordinator's reconciliation, every sale this session.
+function Reconcile({ st }) {
+  const t = totals(st.ledger)
+  return (
+    <>
+      <Heading who="Coordinator · Reconciliation" title="Every shilling accounted for" />
+      <Card>
+        <Row label="M-Pesa collected" value={ksh(t.collected)} strong />
+        <div className="border-t border-sawa-border">
+          <Row label="Creators" value={ksh(t.creators)} />
+          <Row label="Site intermediaries" value={ksh(t.intermediaries)} />
+          <Row label={FUND} value={ksh(t.fund)} />
+          <Row label="Sawa Split" value={ksh(0)} strong />
+        </div>
+        <div className="border-t border-sawa-border">
+          <Row label="Paid out to M-Pesa" value={ksh(t.paidOut)} />
+          <Row label="Still owed (incl. the fund)" value={ksh(t.stillOwed)} />
+        </div>
+      </Card>
+      {t.collected === t.creators + t.intermediaries + t.fund && (
+        <Done>Collected = creators + site intermediaries + fund = paid out + still owed.</Done>
+      )}
+      <Card>
+        <p className="text-sm font-semibold">
+          {FUND}: <span className="font-mono tabular-nums">{ksh(t.fund)}</span>
+        </p>
+        <Note className="mt-1">Held for a partner community conservancy, transferred monthly (two approvals) once signed.</Note>
+      </Card>
+      <Card>
+        <p className="text-sm font-semibold">Beside the totals, never in them</p>
+        <Row label="Cash recorded" value={ksh(t.cashRecorded)} />
+        <Row label="Cash debts still owed by creators" value={ksh(t.cashDebts)} />
+      </Card>
+      <Card>
+        <p className="text-sm font-semibold">
+          Sales this session: <span className="font-mono tabular-nums">{st.sales.length}</span>
+        </p>
+        <ul className="mt-2 flex flex-col">
+          {st.sales.map((x) => (
+            <li key={x.id} className="flex justify-between gap-3 border-t border-sawa-border py-2 text-[13px] first:border-t-0">
+              <span>
+                <span className="font-mono tabular-nums">{x.id}</span> · {x.method === "mpesa" ? "M-Pesa" : "Cash"}
+                {x.withIntermediary ? ` · ${st.inter}` : " · no intermediary"}
+              </span>
+              <span className="font-mono tabular-nums">
+                {x.split.creator} / {x.split.intermediary} / {x.split.fund}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <Note className="mt-1">Creator / site intermediary / fund, in KSh.</Note>
+      </Card>
+    </>
+  )
+}
+
 function Preview() {
   return (
     <span className="inline-flex items-center self-start rounded-sawa border border-dashed border-sawa-text-muted/60 px-2 py-0.5 text-xs font-semibold text-sawa-text-muted">
@@ -206,422 +943,26 @@ function Preview() {
   )
 }
 
-const linkButton = `${tapTarget} self-start text-left text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline`
-
-// 1. The coordinator registers Wanjiru and James in person.
-function Register() {
-  return (
-    <>
-      <h1 className="text-2xl font-semibold">Register creators and site intermediaries</h1>
-      <Card>
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <Hand aria-hidden="true" className="size-4 text-sawa-green" /> Creator
-        </p>
-        <div className="mt-3 grid gap-3">
-          <Filled label="Name" value={SALE.maker} />
-          <Filled label="Site" value={SALE.site} />
-          <Filled label="Site intermediary share" value={`Fixed: ${REF_PCT}%`} mono />
-          <Filled label="Photo consent fee" value={ksh(SALE.photo)} mono />
-        </div>
-        <p className="mt-3 text-[13px] text-sawa-text-muted">
-          Stall code <span className="font-mono text-sawa-text">WANJIRU</span>, printed as the QR on her stand.
-        </p>
-      </Card>
-      <Card>
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <Compass aria-hidden="true" className="size-4 text-sawa-green" /> Site intermediary
-        </p>
-        <div className="mt-3 grid gap-3">
-          <Filled label="Name" value={GUIDE.name} />
-          <Filled label="Type" value={GUIDE.type} />
-        </div>
-        <p className="mt-3 text-[13px] text-sawa-text-muted">
-          Referral code <span className="font-mono text-sawa-text">{GUIDE.code}</span>, printed as the QR on his card.
-        </p>
-      </Card>
-      <Done>Both registered in person, each with a 4-digit PIN.</Done>
-    </>
-  )
-}
-
-// 2. James starts today's tour.
-function StartTour() {
-  const [started, setStarted] = useState(false)
-  return (
-    <>
-      <div>
-        <p className="text-[13px] text-sawa-text-muted">James's dashboard</p>
-        <h1 className="mt-1 text-2xl font-semibold">Today's tour</h1>
-      </div>
-      <Card>
-        {started ? (
-          <div aria-live="polite">
-            <p className="flex items-center gap-2 text-[15px] font-semibold text-sawa-green">
-              <Users aria-hidden="true" className="size-5" /> Tour running
-            </p>
-            <p className="mt-2 font-mono text-2xl font-bold tabular-nums">0 of {GUIDE.group} joined</p>
-            <p className="mt-1 text-[13px] text-sawa-text-muted">Ends at midnight, or when James taps End tour.</p>
-          </div>
-        ) : (
-          <>
-            <Filled label="How many tourists are with you today?" value={GUIDE.group} mono />
-            <SecondaryButton className="mt-4 w-full" onClick={() => setStarted(true)}>
-              Start tour
-            </SecondaryButton>
-          </>
-        )}
-      </Card>
-    </>
-  )
-}
-
-// 3. The tourist scans James's QR and takes him as their guide for the day.
-function TourPass() {
-  const [joined, setJoined] = useState(false)
-  return (
-    <Card>
-      <p className="flex items-center gap-2 text-[13px] text-sawa-text-muted">
-        <QrCode aria-hidden="true" className="size-4" /> You scanned their QR. Registered Sawa Split site intermediary · driver
-      </p>
-      <h1 className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xl font-semibold">
-        {GUIDE.name} · {GUIDE.type} ·{" "}
-        <span className="inline-flex items-center gap-1 text-sawa-green">
-          <Check aria-hidden="true" className="size-5" /> Active
-        </span>
-      </h1>
-      {joined ? (
-        <div className="mt-4 flex flex-col gap-2">
-          <Done>{GUIDE.name} is your site intermediary today.</Done>
-          <p className="text-[13px] text-sawa-text-muted">
-            Saved on this phone until midnight. James's tour: 1 of {GUIDE.group} joined. (In this demo nothing is saved.)
-          </p>
-        </div>
-      ) : (
-        <>
-          <p className="mt-3 text-[15px] text-sawa-text-muted">
-            James is running a tour today. Joining it means each stall's checkout shows his disclosed share.
-          </p>
-          <SecondaryButton className="mt-5 w-full" onClick={() => setJoined(true)}>
-            Use James as my site intermediary today
-          </SecondaryButton>
-        </>
-      )}
-    </Card>
-  )
-}
-
-// 4. Wanjiru enters the agreed price.
-function NewSale() {
-  const [started, setStarted] = useState(false)
-  const total = SALE.amount + SALE.photo
-  return (
-    <>
-      <div>
-        <p className="text-[13px] text-sawa-text-muted">Wanjiru's dashboard</p>
-        <h1 className="mt-1 text-2xl font-semibold">New sale</h1>
-      </div>
-      <Card>
-        {started ? (
-          <div aria-live="polite">
-            <p className="text-[15px] font-semibold">Waiting for the tourist to pay</p>
-            <p className="mt-2 font-mono text-2xl font-bold tabular-nums">{ksh(total)}</p>
-            <p className="mt-1 text-[13px] text-sawa-text-muted">
-              {SALE.item}, {ksh(SALE.amount)} + {ksh(SALE.photo)} photo consent. Expires in 30 minutes.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            <Filled label="Agreed amount (KSh)" value={SALE.amount} mono />
-            <Filled label="Description (optional)" value={SALE.item} />
-            <p className="flex items-center gap-2 text-[15px]">
-              <span className="flex size-5 items-center justify-center rounded-[4px] bg-sawa-green text-white">
-                <Check aria-hidden="true" className="size-4" />
-              </span>
-              Photo consent (+{ksh(SALE.photo)})
-            </p>
-            <SecondaryButton className="mt-1 w-full" onClick={() => setStarted(true)}>
-              Start the sale
-            </SecondaryButton>
-          </div>
-        )}
-      </Card>
-    </>
-  )
-}
-
-function StallHeading() {
-  return (
-    <div>
-      <p className="flex items-center gap-2 text-[13px] text-sawa-text-muted">
-        <ScanLine aria-hidden="true" className="size-4" /> You scanned the stall's QR
-      </p>
-      <h1 className="mt-1 text-2xl font-semibold">{SALE.maker}</h1>
-      <p className="text-[15px] text-sawa-text-muted">
-        {SALE.site} · {SALE.item.toLowerCase()}
-      </p>
-    </div>
-  )
-}
-
-// 5. The tourist scans the stall: "Still with James?", then the breakdown.
-function ScanStall({ withGuide, answer, card }) {
-  return (
-    <>
-      <StallHeading />
-      {withGuide === null ? (
-        <Card>
-          <h2 className="text-lg font-semibold">Still with {GUIDE.name}?</h2>
-          <p className="mt-1 text-[13px] text-sawa-text-muted">
-            If {GUIDE.name} brought you here, he gets his disclosed share of this sale.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <SecondaryButton onClick={() => answer("yes")}>Yes, still with {GUIDE.name}</SecondaryButton>
-            <SecondaryButton onClick={() => answer("no")}>No, not with {GUIDE.name}</SecondaryButton>
-          </div>
-        </Card>
-      ) : (
-        <>
-          <p className="text-[15px]">
-            {withGuide ? (
-              <span className="inline-flex items-center gap-2 text-sawa-green">
-                <Check aria-hidden="true" className="size-4" /> Intermediary · {GUIDE.name}
-              </span>
-            ) : (
-              <span className="text-sawa-text-muted">No site intermediary, so {SALE.makerFirst} keeps 100%.</span>
-            )}
-          </p>
-          <PriceTransparencyCard {...card} />
-          <p className="text-[13px] text-sawa-text-muted">
-            {withGuide
-              ? `${GUIDE.name}'s share is the fixed ${REF_PCT}% site intermediary share, rounded down to whole shillings. `
-              : ""}
-            Photo consent always goes to the creator in full. Nothing is taken out for Sawa Split.
-          </p>
-          <button type="button" onClick={() => answer(null)} className={`${linkButton} -mt-3`}>
-            Change my answer
-          </button>
-        </>
-      )}
-    </>
-  )
-}
-
-// 6. Pay by M-Pesa (simulated); how cash would work instead.
-function Pay({ s, withGuide, onPaid }) {
-  const [paying, setPaying] = useState(false)
-  // "Pay" waits a moment, as the real M-Pesa prompt would, then shows the receipt.
-  useEffect(() => {
-    if (!paying) return undefined
-    const timer = setTimeout(onPaid, 1800)
-    return () => clearTimeout(timer)
-  }, [paying, onPaid])
-  return (
-    <>
-      <StallHeading />
-      <Card className="bg-sawa-bg">
-        <Row label={SALE.makerFirst} value={ksh(s.maker)} />
-        {withGuide && <Row label={`Intermediary · ${GUIDE.name}`} value={ksh(s.guide)} />}
-        <Row label={`Conservation fund (${FUND_PCT}%)`} value={ksh(s.fund)} />
-        <Row label="Sawa Split" value={ksh(0)} />
-        <div className="border-t border-sawa-border">
-          <Row label="Total" value={ksh(s.total)} strong />
-        </div>
-      </Card>
-      <PayButton busy={paying} onClick={() => setPaying(true)}>
-        {paying ? "Waiting for the M-Pesa PIN…" : `Pay ${ksh(s.total)} by M-Pesa (demo)`}
-      </PayButton>
-      <p className="-mt-3 text-[13px] text-sawa-text-muted">
-        In the real checkout an M-Pesa prompt opens on the tourist's phone. Here nothing is sent and nobody is charged.
-      </p>
-      <Card>
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <Banknote aria-hidden="true" className="size-4 text-sawa-green" /> Paying cash instead?
-        </p>
-        <p className="mt-2 text-[13px] text-sawa-text-muted">
-          The tourist hands the cash to {SALE.makerFirst}. The sale counts only once two people confirm it on their phones
-          within 10 minutes: {withGuide ? `${SALE.makerFirst} and ${GUIDE.name}` : `${SALE.makerFirst} and the tourist`}.
-          Otherwise it expires and nothing is credited. Cash is never paid out again by M-Pesa:{" "}
-          {SALE.makerFirst} already has it.
-        </p>
-      </Card>
-    </>
-  )
-}
-
-// 7. The receipt.
-function Receipt({ s, card }) {
-  return (
-    <>
-      <section aria-live="polite" className="flex items-center gap-5">
-        <VerifiedStamp amount={s.total} at={new Date().toISOString()} place={SALE.site} />
-        <div>
-          <StatusBadge status="confirmed" />
-          <h1 className="mt-2 text-2xl font-semibold">Payment confirmed</h1>
-          <p className="mt-1 text-[15px] text-sawa-text-muted">The split is recorded.</p>
-        </div>
-      </section>
-      <PriceTransparencyCard {...card} />
-      <div className="flex flex-col gap-1 text-[13px] text-sawa-text-muted">
-        <p>
-          Receipt <span className="font-mono text-sawa-text">SS-DEMO0001</span> (sample)
-        </p>
-        <p>Nothing was taken out for Sawa Split.</p>
-      </div>
-    </>
-  )
-}
-
-// 8. Both dashboards, credited.
-function Credited({ s }) {
-  return (
-    <>
-      <h1 className="text-2xl font-semibold">Split credited</h1>
-      <div className="grid gap-3">
-        <Card>
-          <p className="flex items-center gap-2 text-sm font-semibold">
-            <Hand aria-hidden="true" className="size-4 text-sawa-green" /> {SALE.maker}'s dashboard
-          </p>
-          <p className="mt-2 font-mono text-3xl font-bold tabular-nums text-sawa-green">+{ksh(s.maker)}</p>
-          <p className="text-[13px] text-sawa-text-muted">
-            {ksh(s.product)} of the necklace + {ksh(SALE.photo)} photo consent
-          </p>
-        </Card>
-        <Card>
-          <p className="flex items-center gap-2 text-sm font-semibold">
-            <Compass aria-hidden="true" className="size-4 text-sawa-green" /> {GUIDE.name}'s dashboard
-          </p>
-          {s.guide > 0 ? (
-            <>
-              <p className="mt-2 font-mono text-3xl font-bold tabular-nums text-sawa-green">+{ksh(s.guide)}</p>
-              <p className="text-[13px] text-sawa-text-muted">His {REF_PCT}% share, disclosed before the tourist paid</p>
-            </>
-          ) : (
-            <p className="mt-2 text-[15px] text-sawa-text-muted">No referral on this sale: the tourist wasn't with him.</p>
-          )}
-        </Card>
-      </div>
-    </>
-  )
-}
-
-// 9. Payouts: Wanjiru withdraws her full balance (simulated).
-function Payouts({ s }) {
-  const [state, setState] = useState("ready") // ready | sending | sent
-  useEffect(() => {
-    if (state !== "sending") return undefined
-    const timer = setTimeout(() => setState("sent"), 1500)
-    return () => clearTimeout(timer)
-  }, [state])
-  return (
-    <>
-      <div>
-        <p className="text-[13px] text-sawa-text-muted">Wanjiru's dashboard</p>
-        <h1 className="mt-1 text-2xl font-semibold">Balance</h1>
-      </div>
-      <Card>
-        <p className="text-[13px] text-sawa-text-muted">Available to withdraw</p>
-        <p className="mt-1 font-mono text-3xl font-bold tabular-nums">{ksh(state === "sent" ? 0 : s.maker)}</p>
-        {state === "sent" ? (
-          <div className="mt-4">
-            <Done>{ksh(s.maker)} sent to Wanjiru's M-Pesa (simulated).</Done>
-          </div>
-        ) : (
-          <>
-            <p className="mt-1 text-[13px] text-sawa-text-muted">
-              It's over {ksh(THRESHOLD)}, so she can withdraw it now, in full.
-            </p>
-            <SecondaryButton className="mt-4 w-full" disabled={state === "sending"} onClick={() => setState("sending")}>
-              {state === "sending" ? "Sending to M-Pesa…" : `Withdraw ${ksh(s.maker)}`}
-            </SecondaryButton>
-          </>
-        )}
-      </Card>
-      <p className="flex items-start gap-2 text-[13px] text-sawa-text-muted">
-        <Wallet aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-sawa-green" />
-        <span>
-          Withdrawals are always the full balance, never part of it. Anyone at {ksh(THRESHOLD)} or more who hasn't
-          withdrawn is paid automatically at 18:00.
-          {s.guide > 0 && ` James's ${ksh(s.guide)} stays credited to him until his balance reaches ${ksh(THRESHOLD)}.`}
-        </span>
-      </p>
-    </>
-  )
-}
-
-// 10. The coordinator's reconciliation: collected = credited, no platform fee.
-function Reconcile({ s }) {
-  return (
-    <>
-      <div>
-        <p className="text-[13px] text-sawa-text-muted">Coordinator · Reconciliation</p>
-        <h1 className="mt-1 text-2xl font-semibold">Every shilling accounted for</h1>
-      </div>
-      <Card>
-        <Row label="M-Pesa collected" value={ksh(s.total)} strong />
-        <div className="border-t border-sawa-border">
-          <Row label="Credited to Wanjiru" value={ksh(s.maker)} />
-          {s.guide > 0 && <Row label="Credited to James" value={ksh(s.guide)} />}
-          <Row label="Credited to the Conservation fund" value={ksh(s.fund)} />
-          <Row label="Platform fee" value={ksh(0)} />
-        </div>
-        <div className="border-t border-sawa-border">
-          <Row label="Paid out to M-Pesa" value={ksh(s.maker)} />
-          <Row label="Still owed" value={ksh(s.guide + s.fund)} />
-        </div>
-      </Card>
-      <Done>Collected = creators + site intermediaries + fund = paid out + still owed.</Done>
-      <Card>
-        <p className="text-sm font-semibold">Conservation fund: {ksh(s.fund)}</p>
-        <p className="mt-1 text-[13px] text-sawa-text-muted">
-          Held for a partner community conservancy, transferred monthly (two approvals) once signed.
-        </p>
-      </Card>
-      {s.guide > 0 && (
-        <Card>
-          <p className="text-sm font-semibold">Site intermediaries</p>
-          <Row label={`${GUIDE.code} · ${GUIDE.type.toLowerCase()} · 1 sale`} value={ksh(s.guide)} />
-        </Card>
-      )}
-    </>
-  )
-}
-
 // 11. Coming next: a static preview, not built.
-function ComingNext() {
+function ComingNext({ st }) {
   const navigate = useNavigate()
+  const items = [
+    { icon: ScanLine, title: "One-scan check-in", text: `A group scans their site intermediary's QR once at the start of the day; every stall after that knows who brought them.` },
+    { icon: BadgeCheck, title: "Find a verified guide", text: `Tourists find a coordinator-verified site intermediary at ${st.site} before they set out. No ratings, no reviews.` },
+    { icon: Landmark, title: "Monthly transfer to the conservancy", text: `The ${FUND.toLowerCase()} goes to a partner community conservancy once a month, with two approvals, reported publicly.` },
+  ]
   return (
     <>
       <Preview />
-      <div className="-mt-3">
-        <h1 className="text-2xl font-semibold">Coming next</h1>
-        <p className="mt-1 text-[15px] text-sawa-text-muted">
-          Find a verified site intermediary near you, then check in with them in one scan.
-        </p>
-      </div>
-      <div>
-        <h2 className="text-base font-semibold">Verified site intermediaries at {SALE.site}</h2>
-        <ul className="mt-3 flex flex-col gap-3">
-          {NEARBY.map((g) => (
-            <li key={g.name} className="rounded-sawa border border-sawa-border bg-sawa-surface p-4">
-              <div className="text-[15px] font-semibold text-sawa-text">
-                {g.name} · site intermediary · {g.type.toLowerCase()}
-              </div>
-              <div className="mt-1 inline-flex items-center gap-1 text-[13px] text-sawa-green">
-                <BadgeCheck aria-hidden="true" className="size-4" /> Coordinator-verified
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <Card>
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <ScanLine aria-hidden="true" className="size-4 text-sawa-green" /> One-scan check-in
-        </p>
-        <p className="mt-2 text-[13px] text-sawa-text-muted">
-          The group scans their chosen site intermediary's QR once at the start of the day; every stall after that knows who brought
-          them. Still no account and no app.
-        </p>
-      </Card>
+      <h1 className="-mt-3 text-2xl font-semibold">Coming next</h1>
+      {items.map(({ icon: Icon, title, text }) => (
+        <Card key={title}>
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <Icon aria-hidden="true" className="size-4 text-sawa-green" /> {title}
+          </p>
+          <Note className="mt-2">{text}</Note>
+        </Card>
+      ))}
       <div className="border-t border-sawa-border pt-3">
         <button
           type="button"
@@ -648,44 +989,35 @@ const navButton =
   "inline-flex min-h-11 items-center gap-2 rounded-sawa border border-white px-4 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-40"
 
 export default function DemoPage() {
-  // The step and the tourist's answer live in the URL: ?step=1..11 opens a step directly
-  // (for links and screenshots), and ?guide=no follows the path without James. From the
-  // payment on, an unanswered "Still with James?" counts as Yes.
+  // The step lives in the URL (?step=1..11 opens a step directly, doing the ones before
+  // it with the defaults); everything else is in memory and starts over on reload.
   const [search, setSearch] = useSearchParams()
   const step = Math.min(Math.max(Number.parseInt(search.get("step"), 10) || 1, 1), LAST)
-  const answered = search.get("guide") === "yes" ? true : search.get("guide") === "no" ? false : null
-  const withGuide = answered === null && step >= 6 ? true : answered
-  const s = split(withGuide !== false)
+  const [st, dispatch] = useReducer(reducer, undefined, initial)
+  const set = (patch) => dispatch({ type: "set", patch })
 
-  function go(n, guide = search.get("guide")) {
-    const next = new URLSearchParams()
-    next.set("step", String(n))
-    if (guide) next.set("guide", guide)
-    setSearch(next, { replace: true })
+  useEffect(() => {
+    dispatch({ type: "ensure", step })
+  }, [step])
+
+  function go(n) {
+    setSearch(new URLSearchParams({ step: String(n) }), { replace: true })
     window.scrollTo({ top: 0 })
   }
-  const answer = (g) => {
-    const next = new URLSearchParams(search)
-    if (g) next.set("guide", g)
-    else next.delete("guide")
-    setSearch(next, { replace: true })
+  const another = () => {
+    dispatch({ type: "another" })
+    go(4)
   }
-  const restart = () => go(1, null)
-  // Next waits on step 5 until "Still with James?" is answered.
-  const blocked = step === 5 && answered === null
+  const reset = () => {
+    dispatch({ type: "reset" })
+    go(1)
+  }
 
-  const card = cardProps({
-    site: SALE.site,
-    producerName: SALE.makerFirst,
-    driverName: withGuide ? GUIDE.name : null,
-    product: { amount: SALE.amount, maker_amount: s.product, driver_amount: s.guide, fund_amount: s.fund },
-    photo: { amount: SALE.photo },
-    total: s.total,
-  })
-
+  const s = draftSplit(st)
   const { screen, explain } = STEPS[step - 1]
-  const text = explain(s, answered)
-  const ScreenIcon = screen?.icon
+  const who = screens(st)[screen]
+  const ScreenIcon = who.icon
+  const props = { st, set, dispatch }
 
   return (
     <div style={BRAND_BACKGROUND} className="flex min-h-screen flex-col">
@@ -694,59 +1026,54 @@ export default function DemoPage() {
       </div>
       <div className="mx-auto w-full max-w-[1000px] flex-1 px-4 py-6 lg:px-8 lg:py-10">
         <Progress step={step} go={go} />
-        <Explain text={text} className="mt-5 lg:hidden" />
+        <Explain text={explain(st, s)} className="mt-5 lg:hidden" />
         <div className="mt-5 grid items-start gap-8 lg:mt-8 lg:grid-cols-[420px_1fr] lg:gap-14">
           <div>
-            {screen && (
-              <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">
-                <ScreenIcon aria-hidden="true" className="size-4" /> {screen.label}
-              </p>
-            )}
-            {!screen && (
-              <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">
-                <Smartphone aria-hidden="true" className="size-4" /> Wanjiru's and James's phones
-              </p>
-            )}
+            <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">
+              <ScreenIcon aria-hidden="true" className="size-4" /> {who.label}
+            </p>
             <main className="flex flex-col gap-6 rounded-[24px] bg-white p-6 shadow-[0_12px_40px_rgba(0,0,0,0.25)] lg:p-8">
-              {step === 1 && <Register />}
-              {step === 2 && <StartTour />}
-              {step === 3 && <TourPass />}
-              {step === 4 && <NewSale />}
-              {step === 5 && <ScanStall withGuide={answered} answer={answer} card={card} />}
-              {step === 6 && <Pay s={s} withGuide={withGuide} onPaid={() => go(7, withGuide ? "yes" : "no")} />}
-              {step === 7 && <Receipt s={s} card={card} />}
-              {step === 8 && <Credited s={s} />}
-              {step === 9 && <Payouts s={s} />}
-              {step === 10 && <Reconcile s={s} />}
-              {step === 11 && <ComingNext />}
+              {step === 1 && <Register {...props} />}
+              {step === 2 && <StartTour {...props} />}
+              {step === 3 && <TourPass {...props} />}
+              {step === 4 && <NewSale {...props} />}
+              {step === 5 && <ScanStall {...props} />}
+              {step === 6 && <Pay {...props} onPaid={() => go(7)} />}
+              {step === 7 && <Receipt st={st} />}
+              {step === 8 && <Dashboards st={st} dispatch={dispatch} go={go} />}
+              {step === 9 && <Payouts st={st} dispatch={dispatch} />}
+              {step === 10 && <Reconcile st={st} />}
+              {step === 11 && <ComingNext st={st} />}
+              {step >= 7 && (
+                <div className="flex flex-wrap gap-3 border-t border-sawa-border pt-4">
+                  <SecondaryButton onClick={another}>Make another sale</SecondaryButton>
+                  <button type="button" onClick={reset} className={`${tapTarget} px-2 text-sm text-sawa-text-muted underline-offset-2 hover:text-sawa-text hover:underline`}>
+                    Reset demo
+                  </button>
+                </div>
+              )}
             </main>
           </div>
-          <Explain text={text} className="hidden lg:mt-7 lg:block" />
+          <Explain text={explain(st, s)} className="hidden lg:mt-7 lg:block" />
         </div>
       </div>
 
       {/* Back and Next: always in reach, on a solid navy bar (the page's teal end is too
-          light behind white text). */}
+          light behind white text). Next past a step not yet done does it with the defaults. */}
       <div className="sticky bottom-0 z-10 border-t border-white/15 bg-[#1B2A41]">
         <div className="mx-auto flex max-w-[1000px] items-center justify-between gap-3 px-4 py-2 lg:px-8">
           <button type="button" onClick={() => go(step - 1)} disabled={step === 1} className={`${navButton} text-white hover:bg-white/10`}>
             <ArrowLeft aria-hidden="true" className="size-4" /> Back
           </button>
           <span className="text-sm text-white/85">
-            {blocked ? (
-              "Answer above to go on"
-            ) : (
-              <>
-                Step <span className="font-mono tabular-nums">{step}</span> of <span className="font-mono tabular-nums">{LAST}</span>
-              </>
-            )}
+            Step <span className="font-mono tabular-nums">{step}</span> of <span className="font-mono tabular-nums">{LAST}</span>
           </span>
           {step < LAST ? (
-            <button type="button" onClick={() => go(step + 1)} disabled={blocked} className={`${navButton} bg-white text-[#1B2A41] hover:bg-white/90`}>
+            <button type="button" onClick={() => go(step + 1)} className={`${navButton} bg-white text-[#1B2A41] hover:bg-white/90`}>
               Next <ArrowRight aria-hidden="true" className="size-4" />
             </button>
           ) : (
-            <button type="button" onClick={restart} className={`${navButton} bg-white text-[#1B2A41] hover:bg-white/90`}>
+            <button type="button" onClick={reset} className={`${navButton} bg-white text-[#1B2A41] hover:bg-white/90`}>
               Start again
             </button>
           )}

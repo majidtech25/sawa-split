@@ -50,28 +50,30 @@ Each beat is tagged with the matching step of the `/#/demo` walkthrough (section
 0. *(demo step 2)* **James's dashboard → Start tour** (see section 2), done before judges sit down. The card shows "0 of N joined".
 1. *(demo step 3)* Tourist phone scans James's referral QR → "Registered Sawa Split site intermediary · driver", "James · Active" → tap **Use James as my site intermediary today**. The join is counted on the server (James's card: "1 of N joined") and the phone keeps it until midnight EAT.
 2. *(demo step 4)* Wanjiru's dashboard → **New sale**: agreed amount (whole KSh, numeric keypad), optional description, optional photo consent (+KSh 10) → **Start the sale**. Status: *Waiting for the tourist to pay*.
-3. *(demo step 5)* Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes, still with James**. The sale appears with **Intermediary code JAMES** filled in and "Intermediary · James". The breakdown comes from the server: with the live legacy split (`SPLIT_MODEL=legacy`) James gets 30% of the agreed amount, rounded down to whole shillings, and Wanjiru the rest plus the photo fee; with the fixed split (`SPLIT_MODEL=fixed`, rule 4) it's 80% Wanjiru, 15% James, 5% Conservation fund, each rounded down except Wanjiru's. The total adds up exactly. ("No, not with James" removes James and clears the tour pass: Wanjiru gets 100%, or 95% plus 5% to the fund with the fixed split.)
+3. *(demo step 5)* Tourist phone scans Wanjiru's stand QR (`#/stall/WANJIRU`) → **Still with James?** → **Yes, still with James**. The sale appears with **Intermediary code JAMES** filled in and "Intermediary · James". The breakdown comes from the server. Live is the fixed split (`SPLIT_MODEL=fixed` since 2026-10-24, rule 4): 80% Wanjiru, 15% James, 5% Conservation & sustainability fund, James's and the fund's each rounded down, the rest to Wanjiru, plus the photo fee. (With `SPLIT_MODEL=legacy`, the rollback, James gets Wanjiru's coordinator-set %, rounded down, and there's no fund.) The total adds up exactly. ("No, not with James" removes James and clears the tour pass: Wanjiru gets 95%, the fund 5%.)
 4. *(demo steps 6–7)* Pay by M-Pesa (the KSh charge is real, see the warning at the top) or cash. For cash, the tourist sees *Waiting for the seller and site intermediary to confirm*. Wanjiru confirms in her sale card ("Cash received? Confirm sale. Your share: KSh X"), and James confirms on his dashboard ("Confirm this sale. You earn KSh Y"). Only then does the tourist's receipt say *Cash payment confirmed*.
 5. *(demo steps 8 and 10)* Coordinator Tab 2: the sale and the split, plus Site intermediaries (JAMES, Driver: sales and commission) and Tours (James: group size, joined, sales, commission) update.
 6. Paying the same sale again, or an expired or cancelled one, is refused with a plain message. A full tour refuses another join ("James's tour is full"), and that tourist pays with no referral.
 
-## 3b. The walkthrough at `/#/demo` (no API, no payment)
+## 3b. The walkthrough at `/#/demo` (interactive, no API, no payment)
 
-A click-through of one sale with sample data, entirely in the browser: it calls no API and stores nothing, so it works without the backend and costs nothing. Every step has its own "What's happening" panel; Back/Next and the step bar move between them. Link a step directly with `/#/demo?step=N` (1–11); add `&guide=no` for the path where the tourist is no longer with James.
+Judges do every step themselves, in the browser only: it calls no API and stores nothing (a reload starts over), so it works without the backend and costs nothing. The split and the ledger follow the live rules (`frontend/src/lib/demoSplit.js`, `demoLedger.js`; `node frontend/scripts/test-demo-split.mjs` tests them: 1000 → 800/150/50, 700 + 10 photo → 570/105/35, no intermediary 1000 → 950/0/50, 333 → 268/49/16). Every step has its "What's happening" panel; Back/Next and the step bar move between them. `/#/demo?step=N` (1–11) opens a step directly, doing the steps before it with the defaults (an M-Pesa sale of KSh 1,000 with the intermediary); Next past a step not yet done does the same. **Make another sale** (steps 7–11) goes back to step 4 and the totals accumulate; **Reset demo** starts over.
 
-| Step | Screen | What it shows |
+Default story (matches the homepage photo and the skit): creator **Mashujaa Dancers** (cultural dance performance, photography included: no photo line), site intermediary **Abdi-Majid** (tour guide), KSh 1,000 → 800 / 150 / 50. Names and price are editable.
+
+| Step | Screen | What the judge does |
 |---|---|---|
-| 1 | Coordinator | Registers Wanjiru (creator, fixed split: 80% creator · 15% site intermediary · 5% conservation, KSh 10 photo fee) and James (site intermediary · driver) in person, each with a PIN |
-| 2 | James | Starts a tour for a group of 4 |
-| 3 | Tourist | Scans James's QR: tour pass for the day |
-| 4 | Wanjiru | New sale: KSh 700, photo consent on (+KSh 10) |
-| 5 | Tourist | Scans the stall: "Still with James?" Yes / No, then the breakdown |
-| 6 | Tourist | Pays by M-Pesa (simulated); a note on cash and its two confirmations |
-| 7 | Tourist | Receipt |
-| 8 | Wanjiru, James | Split credited: Wanjiru KSh 570 (560 + 10 photo), James KSh 105, Conservation fund KSh 35 (No path: Wanjiru KSh 675, fund KSh 35) |
-| 9 | Wanjiru | Payouts: KSh 500 threshold or the 18:00 sweep; Wanjiru withdraws (simulated) |
-| 10 | Coordinator | Reconciliation: collected = creators + site intermediaries + fund; the fund on its own line; Sawa Split keeps nothing |
-| 11 | Tourist | Coming next: find a verified site intermediary, one-scan check-in (preview, not built) |
+| 1 | Coordinator | Edits or keeps the names → **Register** → "Coordinator-verified" |
+| 2 | Abdi-Majid | Group size 1–30 (− / +) → **Start tour** → "0 of N joined" |
+| 3 | Tourist | **Scan Abdi-Majid's QR** (scan animation) → tour pass until midnight |
+| 4 | Mashujaa Dancers | New sale: price (input + slider, KSh 50–5,000); "Product instead of service" offers photo consent (+KSh 10) → **Start the sale** |
+| 5 | Tourist | Scans the stall: "Still with Abdi-Majid?" Yes / No; the breakdown (Creator / Intermediary / Conservation & sustainability fund (5%)) updates live |
+| 6 | Tourist | **M-Pesa**: "Confirm on phone" (simulated; never a PIN field). **Cash**: Abdi-Majid confirms ("You earn KSh 150"), then Mashujaa Dancers (No path: the tourist, then the creator) |
+| 7 | Tourist | Receipt with every line |
+| 8 | Everyone | Balances count up. Cash: the creator's share is kept as cash; 15% to Abdi-Majid and 5% to the fund are owed, and settle whole from the creator's next M-Pesa earnings (**Make an M-Pesa sale to see the debts settle**) |
+| 9 | Everyone | Payouts: **Withdraw** only at KSh 500+ ("Withdraw unlocks at KSh 500. Every evening at 18:00, everyone at KSh 500 or more is paid automatically."); **Run the 18:00 sweep** settles debts, then pays everyone at 500+; the fund: "Ring-fenced — never paid out by the engine" |
+| 10 | Coordinator | Reconciliation of every sale this session: collected = creators + site intermediaries + fund = paid out + still owed; cash beside it; Sawa Split: KSh 0 |
+| 11 | Tourist | Coming next (preview): one-scan check-in, find a verified guide, monthly transfer to a partner community conservancy (two approvals) |
 
 ## 4. Fallback triggers — the driver's call, not the presenter's
 
