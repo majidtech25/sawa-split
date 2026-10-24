@@ -1,7 +1,7 @@
 import { LinkButton, ScrollButton } from "../components/Button"
 import { PAGE_WIDTH } from "../components/Section"
-import hero1920 from "../assets/hero-bg-v2-1920.webp"
-import hero960 from "../assets/hero-bg-v2-960.webp"
+import hero1716 from "../assets/hero-bg-v3-1716.webp"
+import hero960 from "../assets/hero-bg-v3-960.webp"
 
 // The hero's photo: a sunset craft stall with a phone showing the checkout, on the right.
 // An approved exception to the homepage's "no photo in the hero" rule (CLAUDE.md 7.1).
@@ -10,14 +10,14 @@ import hero960 from "../assets/hero-bg-v2-960.webp"
 // is behind the text too, filling the lower part of a full-screen hero (scaled to the
 // screen's height, the phone would otherwise always sit right behind the text), with a
 // top-to-bottom navy gradient so the text up top stays readable and the phone shows below.
-// Below 380px (e.g. 360px phones) the text is a touch smaller and the photo a little lower,
-// so the buttons stay clear of the phone's screen.
-const HERO_SRCSET = `${hero960} 960w, ${hero1920} 1920w`
+// The photo fills the lower 55% (57% below 380px, where the text is a touch smaller), so the
+// buttons stay clear of the phone's screen at 390x844 and 360x800 (measured 2026-10-24, v3).
+const HERO_SRCSET = `${hero960} 960w, ${hero1716} 1716w`
 
 function HeroImage({ className }) {
   return (
     <img
-      src={hero1920}
+      src={hero1716}
       srcSet={HERO_SRCSET}
       sizes="100vw"
       alt=""
@@ -42,7 +42,7 @@ export default function Hero() {
       {/* Phones and tablets: the photo in the lower part, its top edge fading into the navy. */}
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 bottom-0 -z-10 h-[62%] max-[380px]:h-[57%] lg:hidden"
+        className="absolute inset-x-0 bottom-0 -z-10 h-[55%] max-[380px]:h-[57%] lg:hidden"
         style={{ WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, #000 22%)", maskImage: "linear-gradient(to bottom, transparent 0%, #000 22%)" }}
       >
         <HeroImage className="h-full w-full object-cover object-[85%_center]" />
