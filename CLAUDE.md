@@ -334,7 +334,7 @@ Permission matrix. **Browser** is a direct read through Supabase with the Publis
 3. Balance becomes `available` once cleared for payout eligibility. After every STK credit, the maker's outstanding cash debts are settled if the new balance covers them.
 4. `POST /withdrawals/request` (on-demand, full payable balance, ≥ KES 500) or the 18:00 EAT batch sweep (rule 10: settles debts first) triggers Daraja B2C, with a generated idempotency key, after the never-more-than-M-Pesa-collected check.
 5. `POST /daraja/b2c-callback` — marks the ledger entry `paid`, or on failure returns funds to `available` (one automatic retry, then manual coordinator retry).
-6. `GET /admin/reconciliation` — M-Pesa collected vs. disbursed vs. still owed, which always sums exactly and matches the real M-Pesa account balance: collected = creators + intermediaries + Conservation fund = paid out + still owed. The fund is reported on its own line ("Conservation fund: KSh X — held for a partner community conservancy, transferred monthly (two approvals) once signed."); there is no transfer feature yet. Cash recorded and outstanding maker → driver and maker → fund debts are shown separately, beside these totals, never in them.
+6. `GET /admin/reconciliation` — M-Pesa collected vs. disbursed vs. still owed, which always sums exactly and matches the real M-Pesa account balance: collected = creators + intermediaries + Conservation fund = paid out + still owed. The fund is reported on its own line ("Conservation & sustainability fund: KSh X — held for a partner community conservancy, transferred monthly (two approvals) once signed."); there is no transfer feature yet. Cash recorded and outstanding maker → driver and maker → fund debts are shown separately, beside these totals, never in them.
 
 ## 7. Frontend — design tokens and screens
 
@@ -391,6 +391,7 @@ What people read on screen (frontend text, user-facing API messages, docs for us
 | The type, as a detail after the role: "Site intermediary · driver / tour guide / agent" | `drivers.referrer_type` (`driver`, `tour_guide`, `agent`) |
 | Intermediary code | `drivers.referral_code` |
 | "Sawa Split keeps nothing." | rule 4 (no platform fee) |
+| Conservation & sustainability fund *(2026-10-24)* | the Conservation fund of rule 4 (`fund_amount`, `recipient_type = 'fund'`, `creditor_type = 'fund'`) |
 
 "Still with <Name>?" stays as it is. The pitch-day "Driver" in `DEMO_SCRIPT.md` (the person at the laptop) is a presenter role, not the app role.
 

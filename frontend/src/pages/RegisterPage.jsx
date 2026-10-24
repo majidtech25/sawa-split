@@ -240,7 +240,7 @@ export default function RegisterPage() {
                 <p className="text-[13px] text-sawa-text-muted">Site intermediary share</p>
                 <p className="font-mono text-[15px] text-sawa-text">Fixed: 15%</p>
                 <p className="text-xs text-sawa-text-muted">
-                  Every sale: 80% creator, 15% site intermediary, 5% Conservation fund. Photo consent goes to the creator in full.
+                  Every sale: 80% creator, 15% site intermediary, 5% Conservation & sustainability fund. Photo consent goes to the creator in full.
                 </p>
               </div>
             ) : (

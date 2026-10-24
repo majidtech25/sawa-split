@@ -239,7 +239,7 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
             />
             {hasFund && Number(t.fund_debts_outstanding) > 0 && (
               <Tile
-                label="Owed to the Conservation fund"
+                label="Owed to the Conservation & sustainability fund"
                 value={t.fund_debts_outstanding}
                 note="The fund's 5% of cash sales, moved from creators' M-Pesa earnings as they come in"
               />
@@ -247,9 +247,9 @@ export default function ReconciliationPage({ renderTransactionAction, renderWith
           </section>
 
           {hasFund && (
-            <section aria-label="Conservation fund" className="mt-3 rounded-sawa border border-sawa-border bg-sawa-surface p-4">
+            <section aria-label="Conservation & sustainability fund" className="mt-3 rounded-sawa border border-sawa-border bg-sawa-surface p-4">
               <p className="text-sm font-semibold">
-                Conservation fund: <span className="font-mono tabular-nums">{ksh(t.fund)}</span>
+                Conservation & sustainability fund: <span className="font-mono tabular-nums">{ksh(t.fund)}</span>
               </p>
               <p className="mt-1 text-[13px] text-sawa-text-muted">
                 Held for a partner community conservancy, transferred monthly (two approvals) once signed. Ring-fenced: never

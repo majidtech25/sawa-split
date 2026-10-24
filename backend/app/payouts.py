@@ -116,9 +116,9 @@ async def start_payout(session: AsyncSession, recipient_type: str, recipient_id,
                 ).scalars()
             )
             if kinds == {"fund"}:
-                creditors = "the Conservation fund"
+                creditors = "the Conservation & sustainability fund"
             elif "fund" in kinds:
-                creditors = "site intermediaries and the Conservation fund"
+                creditors = "site intermediaries and the Conservation & sustainability fund"
         reason = (
             f"Payable balance (KES {balance}) is below the KES {minimum} withdrawal threshold."
             if balance > 0 or not owed
@@ -271,7 +271,7 @@ async def _check_mpesa_cover(session: AsyncSession, recipient_type: str, recipie
     problem = None
     if t.committed + amount > t.collected - fund:
         problem = (
-            f"M-Pesa collected KES {t.collected}, of which KES {fund} is the Conservation fund's, "
+            f"M-Pesa collected KES {t.collected}, of which KES {fund} is the Conservation & sustainability fund's, "
             f"already paid or paying KES {t.committed}"
         )
     elif amount > own:

@@ -470,7 +470,7 @@ async def main():
             await payouts._check_mpesa_cover(s, "maker", PRODUCER, own)
             capped = "passed"
         except payouts.PayoutCapExceeded as exc:
-            capped = "refused" if "Conservation fund" in str(exc) else f"refused for another reason: {exc}"
+            capped = "refused" if "Conservation & sustainability fund" in str(exc) else f"refused for another reason: {exc}"
         check(f"payout cap: KSh {int(own)} fits in collected {int(collected)} but not in collected - fund {int(fund_total)}: refused", capped, "refused")
         await s.execute(text("delete from withdrawal_requests where recipient_id = :d and status = 'processing' and amount = :a and b2c_receipt is null"),
                         {"d": DRIVER, "a": filler})

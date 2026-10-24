@@ -49,7 +49,7 @@ export function cardProps({ site, producerName, driverName, product, photo, tota
       breakdown: [
         { label: `Creator · ${producerName}`, amount: product.maker_amount ?? product.amount, highlight: true },
         ...(driverName ? [{ label: `Intermediary · ${driverName}`, amount: product.driver_amount }] : []),
-        ...(fund > 0 ? [{ label: "Conservation fund (5%)", amount: product.fund_amount }] : []),
+        ...(fund > 0 ? [{ label: "Conservation & sustainability fund (5%)", amount: product.fund_amount }] : []),
       ],
     })
   }

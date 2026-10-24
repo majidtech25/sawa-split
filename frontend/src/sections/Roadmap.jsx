@@ -20,7 +20,7 @@ const phases = [
 ]
 
 // The fixed split (migration 0020): the conservation share comes out of the price, never on top.
-export const FIXED_SPLIT = "80% creator · 15% site intermediary · 5% conservation — Sawa Split keeps nothing"
+export const FIXED_SPLIT = "80% creator · 15% site intermediary · 5% conservation & sustainability — Sawa Split keeps nothing"
 
 const horizons = [
   { name: "Now", live: true, items: ["Transparent split", FIXED_SPLIT, "M-Pesa + cash", "Tours", "Batched payouts"] },
