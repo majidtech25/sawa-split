@@ -12,7 +12,7 @@ Usage (the TEST .env exported; SB_URL / SB_KEY from frontend/.env; OLDCODE_STATE
   setup:        cd backend && PYTHONPATH=. .venv/bin/python scripts/dev/oldcode_check.py setup
   check, probe: cd <a worktree of main>/backend && PYTHONPATH=. <repo>/backend/.venv/bin/python \\
                   <repo>/backend/scripts/dev/oldcode_check.py check   (then: probe)
-Clean up afterwards like verify_split_model.sh does (this run's sales, ledger rows, debts, tour).
+All three phases plus the cleanup in one go: scripts/dev/oldcode_run.sh <worktree of main>.
 """
 import asyncio, json, os, sys, uuid
 

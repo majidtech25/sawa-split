@@ -12,7 +12,8 @@
 #   - the split is stored when the payment starts: a sale made in fixed mode and credited
 #     after switching to legacy (late credit, callback, cash confirmation) is still 80/15/5;
 #   - cash: the intermediary's 15% and the fund's 5% are debts from the creator, settled
-#     from her M-Pesa earnings; a disputed sale's fund debt waits like the intermediary's;
+#     from her M-Pesa earnings, also after switching back to legacy (the rollback path);
+#     a disputed sale's fund debt waits like the intermediary's;
 #   - the fund is never payable: not in the creator's payable, not a sweep candidate,
 #     refused as a payout recipient, and the payout cap keeps its money out;
 #   - reconciliation: collected = creators + intermediaries + fund, balanced.
@@ -220,13 +221,30 @@ async def pay(sale_id, method, *, ref=True, join=None):
         await asyncio.sleep(3)
     sys.exit(f"FATAL: could not pay: {r.status_code} {r.text[:300]}")
 
+async def sql(s, query, params, take, commit=False):
+    """The harness's own reads and repeatable writes, retried on a DB/network timeout only
+    (logged and listed like the API's retries); anything else is raised."""
+    for attempt in range(3):
+        try:
+            res = take(await s.execute(text(query), params))
+            if commit:
+                await s.commit()
+            return res
+        except Exception as exc:
+            names = {type(e).__name__ for e in _chain(exc)}
+            if attempt == 2 or not (TIMEOUT_NAMES & names):
+                raise
+            note_retry(f"harness DB: {' '.join(query.split())[:60]}", exc)
+            await s.rollback()
+            await asyncio.sleep(3)
+
 async def crid_of(s, tid):
-    return (await s.execute(text("select checkout_request_id from transaction_secrets where transaction_id = :t"), {"t": tid})).scalar_one()
+    return await sql(s, "select checkout_request_id from transaction_secrets where transaction_id = :t", {"t": tid}, lambda r: r.scalar_one())
 
 async def callback(s, tid):
     """A simulated Daraja success callback to the real endpoint, at the sale's signed URL."""
     from app import links
-    total = (await s.execute(text("select total_amount from transactions where id = :t"), {"t": tid})).scalar_one()
+    total = await sql(s, "select total_amount from transactions where id = :t", {"t": tid}, lambda r: r.scalar_one())
     crid = await crid_of(s, tid)
     payload = {"Body": {"stkCallback": {"CheckoutRequestID": crid, "ResultCode": 0, "CallbackMetadata": {"Item": [
         {"Name": "Amount", "Value": int(total)}, {"Name": "MpesaReceiptNumber", "Value": "SIM" + uuid.uuid4().hex[:10].upper()}]}}}}
@@ -236,28 +254,28 @@ async def callback(s, tid):
 
 async def hold_off(s, tid):
     # Nothing may ask Safaricom about these sales; nothing would answer anyway (blocked).
-    await s.execute(text("update stk_verifications set next_check_at = now() + interval '1 hour' where transaction_id = :t"), {"t": tid})
-    await s.commit()
+    await sql(s, "update stk_verifications set next_check_at = now() + interval '1 hour' where transaction_id = :t", {"t": tid},
+              lambda r: None, commit=True)
 
 async def stored(s, tid):
-    r = (await s.execute(text(
+    r = await sql(s,
         "select split_model, product_maker_amount, product_driver_amount, fund_amount, maker_amount, driver_amount, total_amount "
-        "from transactions where id = :t"), {"t": tid})).one()
+        "from transactions where id = :t", {"t": tid}, lambda x: x.one())
     return f"{r.split_model} {int(r.maker_amount)}/{int(r.driver_amount)}/{int(r.fund_amount)} total {int(r.total_amount)}"
 
 async def entries(s, tid):
-    rows = (await s.execute(text(
+    rows = await sql(s,
         "select recipient_type, amount, status from wallet_ledger_entries where transaction_id = :t and settlement_id is null "
-        "order by recipient_type"), {"t": tid})).all()
+        "order by recipient_type", {"t": tid}, lambda x: x.all())
     return ", ".join(f"{r.recipient_type} {int(r.amount)} {r.status}" for r in rows)
 
 async def debts(s, tid):
-    rows = (await s.execute(text(
-        "select creditor_type, amount, status from cash_debts where transaction_id = :t order by creditor_type"), {"t": tid})).all()
+    rows = await sql(s,
+        "select creditor_type, amount, status from cash_debts where transaction_id = :t order by creditor_type", {"t": tid}, lambda x: x.all())
     return ", ".join(f"{r.creditor_type} {int(r.amount)} {r.status}" for r in rows)
 
-async def scalar(s, sql, **p):
-    return (await s.execute(text(sql), p)).scalar_one()
+async def scalar(s, query, **p):
+    return await sql(s, query, p, lambda r: r.scalar_one())
 
 async def confirm(tid, *who):
     for w in who:
@@ -334,8 +352,7 @@ async def main():
         sid = await new_sale(1000)
         tl = (await pay(sid, "mpesa", join=join))["id"]
         settings.split_model = "legacy"
-        await s.execute(text("update transactions set created_at = now() - interval '11 minutes' where id = :t"), {"t": tl})
-        await s.commit()
+        await sql(s, "update transactions set created_at = now() - interval '11 minutes' where id = :t", {"t": tl}, lambda r: None, commit=True)
         await verification.mark_unresolved()
         check("unresolved after 10 minutes, nobody credited", await entries(s, tl), "")
         state = await verification.check_payment(s, tl, query=paid)
@@ -380,6 +397,9 @@ async def main():
         check("...then disputed", r.json().get("status"), "disputed")
 
         print("\n== Test 5: settlement from M-Pesa earnings; a disputed sale's fund debt waits ==")
+        # In legacy mode: the rollback path (flip SPLIT_MODEL back, keep this code) must still
+        # settle the fund debts made in fixed mode, and keep the fund out of payouts (Test 7).
+        settings.split_model = "legacy"
         for tid in credited:
             await req("POST", f"/admin/transactions/{tid}/resolve", headers=auth("coord"))
         sid = await new_sale(100)
@@ -388,11 +408,12 @@ async def main():
         check("Case A debts settled: intermediary 150, fund 50", await debts(s, ca), "driver 150 settled, fund 50 settled")
         check("Case B fund debt settled: 20", await debts(s, cb["id"]), "fund 20 settled")
         check("the disputed sale's debts wait, the fund's included", await debts(s, cd), "driver 90 outstanding, fund 30 outstanding")
-        made = (await s.execute(text(
+        made = await scalar(s,
             "select string_agg(recipient_type || ' ' || amount::int, ', ' order by recipient_type, amount) from wallet_ledger_entries "
-            "where settlement_id in (select id from cash_debts where transaction_id in (:a, :b)) and recipient_type <> 'maker'"),
-            {"a": ca, "b": cb["id"]})).scalar_one()
-        check("settlement credited the intermediary and the fund (M-Pesa money moved from the creator)", made, "driver 150, fund 20, fund 50")
+            "where settlement_id in (select id from cash_debts where transaction_id in (:a, :b)) and recipient_type <> 'maker'",
+            a=ca, b=cb["id"])
+        check("settlement in legacy mode credited the intermediary and the fund (M-Pesa money moved from the creator)", made, "driver 150, fund 20, fund 50")
+        check("...and the legacy credit that settled them has no fund share", await stored(s, tt), "legacy 100/0/0 total 100")
         await req("POST", f"/admin/transactions/{cd}/resolve", headers=auth("coord"))
         sid = await new_sale(100)
         tu = (await pay(sid, "mpesa", ref=False))["id"]
@@ -420,7 +441,7 @@ async def main():
         me = (await req("GET", "/accounts/me", headers=auth("maker"))).json()
         check("creator's payable = her own available - her debts (the fund's money isn't in it)", D(str(me["payable"])), max(avail - owed, D(0)))
         fund_total = await scalar(s, "select coalesce(sum(amount), 0) from wallet_ledger_entries where recipient_type = 'fund' and status in ('pending','available','frozen')")
-        check("the fund holds 50+35+50+16+50+50 (M-Pesa) + 50+20+30 (cash, settled) + 5+5 = 361", int(fund_total), 361)
+        check("the fund holds 50+35+50+16+50+50 (M-Pesa) + 50+20+30 (cash, settled in legacy mode) = 351", int(fund_total), 351)
         cands = {(c.recipient_type, str(c.recipient_id)) for c in await payouts.sweep_candidates(s)}
         check("the sweep never picks the fund", any(t == "fund" for t, _ in cands), False)
         try:
@@ -466,7 +487,7 @@ async def main():
         rec = (await req("GET", "/admin/reconciliation", headers=auth("coord"))).json()["totals"]
         c, cr, im, fd = (D(str(rec[k])) for k in ("collected", "creators", "intermediaries", "fund"))
         check("collected = creators + intermediaries + fund", c, cr + im + fd)
-        check("fund line = the fund's ledger total (361)", int(fd), 361)
+        check("fund line = the fund's ledger total (351)", int(fd), 351)
         check("balanced", rec["balanced"], True)
         check("no fund debt left outstanding", D(str(rec["fund_debts_outstanding"])), D(0))
 

@@ -6,14 +6,15 @@
 # database connections dead. This guard watches the real clock instead:
 #   - the cutoff is the next HH:MM EAT; it refuses to start between the cutoff and 18:00, or if
 #     the run could still be going at the cutoff (now + limit > cutoff);
-#   - it stops the run (its whole process group) at the cutoff, or once the limit has passed
+#   - it stops the run (TERM to its process group, KILL only after up to 3 minutes for the
+#     suite's own cleanup trap) at the cutoff, or once the limit has passed
 #     in wall-clock time, whichever comes first;
 #   - it stops the run if the host slept (the wall clock jumped more than 2 minutes between
 #     two checks 15 seconds apart): connections opened before a sleep can't be trusted;
 #   - it prints a STALL line if the log hasn't grown for 10 minutes (and keeps running).
 # Its own lines start with "GUARD", so a monitor can watch for them.
 #
-# Usage (from backend/): scripts/dev/run_guarded.sh <cutoff HH:MM, EAT> <limit seconds | 0 = until the cutoff> <log> -- <command...>
+# Usage (from backend/): export GUARD_LAUNCHED_AT=$(date +%s); <setup, e.g. source .env>; scripts/dev/run_guarded.sh <cutoff HH:MM, EAT> <limit seconds | 0 = until the cutoff> <log> -- <command...>
 # Exit: the command's own exit code, or 125 if refused, 124 if stopped by the guard.
 set -uo pipefail
 
@@ -30,6 +31,14 @@ if [ "$NOW" -ge "$CUTOFF" ] && [ "$NOW" -lt "$SWEEP" ]; then
   exit 125
 fi
 [ "$NOW" -ge "$CUTOFF" ] && CUTOFF=$(TZ=Africa/Nairobi date -d "tomorrow $CUTOFF_HM" +%s)
+# A sleep before the loop below starts (2026-10-23: launched 23:03, started 23:48) is caught
+# only if the launcher records its own time first: GUARD_LAUNCHED_AT=$(date +%s) as the very
+# first thing in the launch command. More than 2 minutes between that and now means the host slept.
+if [ -n "${GUARD_LAUNCHED_AT:-}" ] && [ $((NOW - GUARD_LAUNCHED_AT)) -gt 120 ]; then
+  echo "GUARD refused: the host slept before the guard started (launched $(TZ=Africa/Nairobi date -d @"$GUARD_LAUNCHED_AT" +%H:%M:%S), started $(TZ=Africa/Nairobi date +%H:%M:%S) EAT)" | tee -a "$LOG"
+  exit 125
+fi
+[ -n "${GUARD_LAUNCHED_AT:-}" ] || echo "GUARD note: GUARD_LAUNCHED_AT not set; a sleep before the start can't be detected" >>"$LOG"
 [ "$LIMIT" = 0 ] && LIMIT=$((CUTOFF - NOW))
 if [ "$NOW" -ge "$CUTOFF" ] || [ $((NOW + LIMIT)) -gt "$CUTOFF" ]; then
   echo "GUARD refused: '$*' could still be running at $CUTOFF_HM EAT (now $(TZ=Africa/Nairobi date +%H:%M), limit ${LIMIT}s)" | tee -a "$LOG"
@@ -44,7 +53,10 @@ PID=$!
 stop() {
   echo "GUARD stopped $(TZ=Africa/Nairobi date +%H:%M:%S) EAT: $1" | tee -a "$LOG"
   kill -TERM -- "-$PID" 2>/dev/null
-  sleep 5
+  # The suites clean up from an EXIT trap (a fresh psql connection), which TERM starts:
+  # give it up to 3 minutes before KILL, which would cut it off (2026-10-24, run 4's rows left).
+  for _ in $(seq 36); do kill -0 "$PID" 2>/dev/null || break; sleep 5; done
+  kill -0 "$PID" 2>/dev/null && echo "GUARD cleanup did not finish in 3 minutes; killed, the run's rows may be left" | tee -a "$LOG"
   kill -KILL -- "-$PID" 2>/dev/null
   wait "$PID" 2>/dev/null
   exit 124
